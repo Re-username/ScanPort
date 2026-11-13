@@ -1,0 +1,506 @@
+@page "/"
+@implements IAsyncDisposable
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<PageTitle>Сканер портов</PageTitle>
+
+<div class="header">
+    <h1>Сканер открытых портов</h1>
+    <button type="button" class="btn" @onclick="OpenHelp" title="Открыть справку (F1)">F1 · Справка</button>
+    <button type="button" class="btn" @onclick="ToggleTheme" title="Переключить тему">@(IsDark ? "☀ Светлая" : "☾ Тёмная")</button>
+</div>
+
+<div class="form-grid">
+    <label>
+        IP-адрес или хост
+        <input @bind="Host" placeholder="192.168.1.1" disabled="@IsScanning" />
+    </label>
+    <label>
+        Порт от
+        <input type="number" @bind="StartPort" min="1" max="65535" disabled="@IsScanning" />
+    </label>
+    <label>
+        Порт до
+        <input type="number" @bind="EndPort" min="1" max="65535" disabled="@IsScanning" />
+    </label>
+    <label>
+        Таймаут, мс
+        <input type="number" @bind="TimeoutMs" min="100" max="30000" disabled="@IsScanning" />
+    </label>
+    <div>
+        @if (!IsScanning)
+        {
+            <button type="button" class="btn primary" @onclick="StartScan">Сканировать</button>
+        }
+        else
+        {
+            <button type="button" class="btn danger" @onclick="CancelScan">Отмена</button>
+        }
+    </div>
+    <div class="checks">
+        <label title="TCP: открыт, если удалось установить соединение"><input type="checkbox" @bind="DoTcp" disabled="@IsScanning" /> TCP</label>
+        <label title="UDP: открыт при ответе; без ответа результат неопределён"><input type="checkbox" @bind="DoUdp" disabled="@IsScanning" /> UDP</label>
+        <label title="Баннер — текстовый ответ службы после подключения или запроса"><input type="checkbox" @bind="DoBanner" disabled="@IsScanning" /> Баннер</label>
+        <label title="Проверка ICMP при старте и далее каждые 5 секунд"><input type="checkbox" @bind="DoPing" disabled="@IsScanning" /> Ping (ICMP)</label>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(ErrorMessage))
+{
+    <div class="alert error" role="alert">@ErrorMessage</div>
+}
+
+@if (IsScanning || ScannedPorts > 0 || !string.IsNullOrEmpty(PingInfo))
+{
+    <div class="progress-wrap">
+        <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@ProgressPercent">
+            <div class="progress-bar @(IsScanning ? "animated" : "")" style="width: @ProgressPercent%">
+                @ProgressPercent%
+            </div>
+        </div>
+        <div class="progress-note" aria-live="polite">
+            Проверено: @ScannedPorts из @TotalPorts
+            @if (!string.IsNullOrEmpty(PingInfo))
+            {
+                <span> · @PingInfo</span>
+            }
+        </div>
+    </div>
+}
+
+@if (Results.Count > 0)
+{
+    <div class="results-heading">
+        <h3>Найдено (@Results.Count)</h3>
+        <span>Нажмите на заголовок столбца для сортировки</span>
+    </div>
+    <div class="results-table">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 90px;" aria-sort="@AriaSort("port")">
+                        <button type="button" class="th-sort" @onclick="@(() => SortBy("port"))">Порт <span>@SortMark("port")</span></button>
+                    </th>
+                    <th style="width: 100px;" aria-sort="@AriaSort("protocol")">
+                        <button type="button" class="th-sort" @onclick="@(() => SortBy("protocol"))">Протокол <span>@SortMark("protocol")</span></button>
+                    </th>
+                    <th style="width: 140px;" aria-sort="@AriaSort("status")">
+                        <button type="button" class="th-sort" @onclick="@(() => SortBy("status"))">Статус <span>@SortMark("status")</span></button>
+                    </th>
+                    <th aria-sort="@AriaSort("banner")">
+                        <button type="button" class="th-sort" @onclick="@(() => SortBy("banner"))">Сервис / баннер <span>@SortMark("banner")</span></button>
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in SortedResults)
+                {
+                    <tr>
+                        <td class="open-port">@r.Port</td>
+                        <td>@r.Protocol.ToUpperInvariant()</td>
+                        <td class="st-@r.Status">@StatusText(r.Status)</td>
+                        <td class="banner-cell" title="@BannerText(r)">@BannerText(r)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
+{
+    <div class="alert info">
+        Открытые порты не найдены. Проверьте диапазон и таймаут. Отсутствие ответа на ping не означает,
+        что TCP-порты закрыты: сканирование соединений выполняется независимо.
+    </div>
+}
+
+<div class="log-wrap">
+    <div class="log-heading">
+        <h3>Журнал <span class="log-count">@LogEntries.Count / @MaxLogEntries</span></h3>
+        <button type="button" class="btn btn-small" @onclick="ClearLog" disabled="@(LogEntries.Count == 0)">Очистить</button>
+    </div>
+    <div class="log" aria-live="polite">
+        @if (LogEntries.Count == 0)
+        {
+            <div class="empty">— событий пока нет —</div>
+        }
+        else
+        {
+            @foreach (var e in LogEntries)
+            {
+                <div><span class="t">@e.Time</span><span class="@e.CssClass">@e.Text</span></div>
+            }
+        }
+    </div>
+</div>
+
+@if (HelpVisible)
+{
+    <div class="help-backdrop" @onclick="CloseHelp">
+        <section class="help-dialog" role="dialog" aria-modal="true" aria-labelledby="help-title" @onclick:stopPropagation="true">
+            <div class="help-header">
+                <h2 id="help-title">Справка по сканеру портов</h2>
+                <button type="button" class="btn" @ref="HelpCloseButton" @onclick="CloseHelp" title="Закрыть (Esc)">Закрыть · Esc</button>
+            </div>
+            <div class="help-body">
+                <section>
+                    <h3>Быстрый старт</h3>
+                    <ol>
+                        <li>Введите IP-адрес или имя своего устройства, например <code>192.168.1.1</code>.</li>
+                        <li>Укажите диапазон портов, выберите TCP и нажмите «Сканировать».</li>
+                        <li>Для определения службы включите «Баннер». «Ping» можно оставить включённым — он не влияет на проверку портов.</li>
+                    </ol>
+                </section>
+                <section>
+                    <h3>Диапазон портов</h3>
+                    <p>Допустимы значения от <strong>1 до 65535</strong>, границы входят в проверку. Порт «от» не может быть больше порта «до».</p>
+                    <ul>
+                        <li><code>80 — 80</code> — проверить один порт;</li>
+                        <li><code>1 — 1024</code> — стандартные системные и сетевые службы;</li>
+                        <li><code>8000 — 8100</code> — альтернативные веб-интерфейсы;</li>
+                        <li><code>1 — 65535</code> — полная проверка, может занять много времени.</li>
+                    </ul>
+                </section>
+                <section>
+                    <h3>Что такое баннер</h3>
+                    <p><strong>Баннер — это текстовый ответ программы, которая работает на открытом порту.</strong> Например: <code>SSH-2.0-OpenSSH_9.6</code>, <code>220 FTP ready</code> или <code>HTTP/1.1 200 OK · Server: nginx</code>.</p>
+                    <p>Сканер сначала ждёт приветствие службы. Для типичных веб-портов дополнительно отправляет HTTP-запрос <code>HEAD /</code>. Пустой баннер — это нормально: многие службы не сообщают название или используют шифрование. <strong>Отсутствие баннера не означает, что порт закрыт.</strong></p>
+                </section>
+                <section>
+                    <h3>TCP, UDP и ping</h3>
+                    <ul>
+                        <li><strong>TCP · открыт</strong> — устройство приняло TCP-соединение.</li>
+                        <li><strong>UDP · открыт</strong> — на пробную датаграмму получен ответ.</li>
+                        <li><strong>UDP · неопределённо</strong> — ответа нет; порт может быть открыт, а ответ заблокирован фильтром.</li>
+                        <li><strong>Ping</strong> выполняется сразу и затем каждые 5 секунд. Если устройство запрещает ICMP, TCP/UDP-порты всё равно проверяются.</li>
+                    </ul>
+                </section>
+                <section>
+                    <h3>Результаты и журнал</h3>
+                    <p>Нажатие на заголовок «Порт», «Протокол», «Статус» или «Сервис / баннер» сортирует таблицу; повторное нажатие меняет направление. Журнал хранит до <strong>2000 последних событий</strong> и не очищается при новом сканировании.</p>
+                </section>
+                <section>
+                    <h3>Горячие клавиши</h3>
+                    <p><kbd>F1</kbd> — открыть эту справку. <kbd>Esc</kbd> — закрыть справку. Кнопка «Отмена» останавливает текущее сканирование.</p>
+                    <p class="help-note">Сканируйте только собственные устройства и сети либо системы, на проверку которых у вас есть разрешение.</p>
+                </section>
+            </div>
+        </section>
+    </div>
+}
+
+@code {
+    private const int MaxLogEntries = 2000;
+
+    private string Host { get; set; } = "127.0.0.1";
+    private int StartPort { get; set; } = 1;
+    private int EndPort { get; set; } = 1024;
+    private int TimeoutMs { get; set; } = 1000;
+    private bool DoTcp { get; set; } = true;
+    private bool DoUdp { get; set; }
+    private bool DoBanner { get; set; }
+    private bool DoPing { get; set; } = true;
+
+    private bool IsScanning;
+    private bool ScanCompleted;
+    private bool IsDark = true;
+    private bool HelpVisible;
+    private bool _focusHelp;
+    private bool _cancelRequested;
+    private bool _disposed;
+    private string? ErrorMessage;
+    private string? PingInfo;
+    private string? _pingLogged;
+    private List<PortResult> Results = new();
+    private HashSet<string> _knownKeys = new();
+    private int ScannedPorts;
+    private int TotalPorts;
+    private string SortColumn = "port";
+    private bool SortAscending = true;
+    private readonly List<LogEntry> LogEntries = new();
+    private DotNetObjectReference<Home>? _helpReference;
+    private ElementReference HelpCloseButton;
+
+    private int ProgressPercent => TotalPorts == 0 ? 0 : Math.Min(100, (int)(100.0 * ScannedPorts / TotalPorts));
+
+    private IEnumerable<PortResult> SortedResults
+    {
+        get
+        {
+            Func<PortResult, object> key = SortColumn switch
+            {
+                "protocol" => r => r.Protocol,
+                "status" => r => StatusText(r.Status),
+                "banner" => r => BannerText(r),
+                _ => r => r.Port
+            };
+            var sorted = SortAscending
+                ? Results.OrderBy(key).ThenBy(r => r.Port).ThenBy(r => r.Protocol)
+                : Results.OrderByDescending(key).ThenByDescending(r => r.Port).ThenByDescending(r => r.Protocol);
+            return sorted;
+        }
+    }
+
+    private sealed record LogEntry(string Time, string Text, string CssClass);
+
+    private static readonly Dictionary<int, string> KnownServices = new()
+    {
+        [20] = "FTP (data)", [21] = "FTP (control)", [22] = "SSH", [23] = "Telnet",
+        [25] = "SMTP", [53] = "DNS", [67] = "DHCP (server)", [68] = "DHCP (client)",
+        [69] = "TFTP", [80] = "HTTP", [110] = "POP3", [111] = "RPC", [123] = "NTP",
+        [135] = "RPC (Windows)", [137] = "NetBIOS name", [138] = "NetBIOS datagram",
+        [139] = "NetBIOS session", [143] = "IMAP", [161] = "SNMP", [162] = "SNMP trap",
+        [443] = "HTTPS", [445] = "SMB", [500] = "IKE (IPsec)", [502] = "Modbus TCP",
+        [514] = "Syslog", [520] = "RIP", [993] = "IMAPS", [995] = "POP3S", [1194] = "OpenVPN",
+        [1433] = "MS SQL Server", [1434] = "MS SQL Browser (UDP)", [1521] = "Oracle DB",
+        [1701] = "L2TP", [1723] = "PPTP", [1812] = "RADIUS", [1900] = "UPnP (SSDP)",
+        [3306] = "MySQL", [3389] = "RDP", [4500] = "IPsec NAT-T", [5353] = "mDNS",
+        [5432] = "PostgreSQL", [5900] = "VNC", [5985] = "WinRM (HTTP)", [6379] = "Redis",
+        [8080] = "HTTP (alt)", [9600] = "Omron FINS", [11740] = "CODESYS V3 TCP",
+        [27017] = "MongoDB", [44818] = "EtherNet/IP", [53478] = "CODESYS V3 (UDP)"
+    };
+
+    private sealed record ScanStartResponse(string? Error);
+    private sealed record ScanStatus(int Scanned, int Total, PortResult[]? Results, bool Running, string? Error, string? Ping);
+    private sealed record PortResult(int Port, string Protocol, string Status, string? Banner);
+
+    private static string StatusText(string status) => status == "open" ? "открыт" : "неопределённо";
+
+    private static string BannerText(PortResult r)
+    {
+        if (!string.IsNullOrWhiteSpace(r.Banner)) return r.Banner;
+        return KnownServices.TryGetValue(r.Port, out var service) ? service : "—";
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            IsDark = await JS.InvokeAsync<string>("getTheme") != "light";
+            _helpReference = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("portScannerHelp.init", _helpReference);
+            StateHasChanged();
+        }
+
+        if (_focusHelp && HelpVisible)
+        {
+            _focusHelp = false;
+            try { await HelpCloseButton.FocusAsync(); } catch (JSException) { }
+        }
+    }
+
+    private async Task ToggleTheme()
+    {
+        IsDark = !IsDark;
+        await JS.InvokeVoidAsync("setTheme", IsDark ? "dark" : "light");
+    }
+
+    private async Task OpenHelp()
+    {
+        HelpVisible = true;
+        _focusHelp = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void CloseHelp()
+    {
+        HelpVisible = false;
+        _focusHelp = false;
+    }
+
+    [JSInvokable]
+    public async Task ShowHelpFromHotkey()
+    {
+        await InvokeAsync(async () => await OpenHelp());
+    }
+
+    [JSInvokable]
+    public async Task CloseHelpFromHotkey()
+    {
+        await InvokeAsync(() =>
+        {
+            CloseHelp();
+            StateHasChanged();
+        });
+    }
+
+    private void SortBy(string column)
+    {
+        if (SortColumn == column) SortAscending = !SortAscending;
+        else
+        {
+            SortColumn = column;
+            SortAscending = true;
+        }
+    }
+
+    private string SortMark(string column) => SortColumn == column ? (SortAscending ? "▲" : "▼") : "";
+    private string AriaSort(string column) => SortColumn != column ? "none" : (SortAscending ? "ascending" : "descending");
+
+    private void AddLog(string text, string cssClass = "")
+    {
+        LogEntries.Insert(0, new LogEntry(DateTime.Now.ToString("HH:mm:ss"), text, cssClass));
+        if (LogEntries.Count > MaxLogEntries)
+            LogEntries.RemoveRange(MaxLogEntries, LogEntries.Count - MaxLogEntries);
+    }
+
+    private void ClearLog() => LogEntries.Clear();
+
+    private async Task StartScan()
+    {
+        ErrorMessage = null;
+        Results = new List<PortResult>();
+        _knownKeys = new HashSet<string>();
+        ScannedPorts = 0;
+        TotalPorts = 0;
+        ScanCompleted = false;
+        _cancelRequested = false;
+        PingInfo = null;
+        _pingLogged = null;
+        SortColumn = "port";
+        SortAscending = true;
+
+        if (string.IsNullOrWhiteSpace(Host))
+        {
+            ErrorMessage = "Введите IP-адрес или имя хоста.";
+            return;
+        }
+        if (StartPort < 1 || StartPort > 65535 || EndPort < 1 || EndPort > 65535 || StartPort > EndPort)
+        {
+            ErrorMessage = "Некорректный диапазон портов (допустимо: 1–65535, от ≤ до).";
+            return;
+        }
+        if (TimeoutMs < 100 || TimeoutMs > 30000)
+        {
+            ErrorMessage = "Таймаут должен быть от 100 до 30000 мс.";
+            return;
+        }
+        if (!DoTcp && !DoUdp)
+        {
+            ErrorMessage = "Выберите хотя бы один метод: TCP и/или UDP.";
+            return;
+        }
+        if (DoBanner && !DoTcp)
+        {
+            ErrorMessage = "Захват баннера работает только вместе с TCP.";
+            return;
+        }
+
+        try
+        {
+            var response = await Http.PostAsJsonAsync("api/scan/start", new
+            {
+                host = Host.Trim(),
+                startPort = StartPort,
+                endPort = EndPort,
+                timeoutMs = TimeoutMs,
+                tcp = DoTcp,
+                udp = DoUdp,
+                banner = DoBanner,
+                ping = DoPing
+            });
+            var body = await response.Content.ReadFromJsonAsync<ScanStartResponse>();
+            if (body?.Error != null)
+            {
+                ErrorMessage = body.Error;
+                AddLog(body.Error, "err");
+                return;
+            }
+            response.EnsureSuccessStatusCode();
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = "Не удалось запустить сканирование: " + ex.Message;
+            AddLog(ErrorMessage, "err");
+            return;
+        }
+
+        AddLog($"Сканирование запущено: {Host.Trim()} [{MethodsText()}], порты {StartPort}–{EndPort} (таймаут {TimeoutMs} мс)", "dim");
+        IsScanning = true;
+        _ = PollLoop();
+    }
+
+    private string MethodsText()
+    {
+        var list = new List<string>();
+        if (DoTcp) list.Add("TCP");
+        if (DoUdp) list.Add("UDP");
+        if (DoBanner) list.Add("баннер");
+        if (DoPing) list.Add("ping/5с");
+        return string.Join("+", list);
+    }
+
+    private async Task PollLoop()
+    {
+        while (IsScanning && !_disposed)
+        {
+            await Task.Delay(400);
+            try
+            {
+                var status = await Http.GetFromJsonAsync<ScanStatus>("api/scan/status");
+                if (status == null) continue;
+                ScannedPorts = status.Scanned;
+                TotalPorts = status.Total;
+                Results = status.Results?.ToList() ?? new List<PortResult>();
+                PingInfo = status.Ping;
+                if (!string.IsNullOrEmpty(status.Ping) && status.Ping != _pingLogged)
+                {
+                    _pingLogged = status.Ping;
+                    AddLog(status.Ping, status.Ping.StartsWith("Хост отвечает") ? "ok" : "dim");
+                }
+                foreach (var result in Results)
+                {
+                    var key = result.Protocol + ":" + result.Port;
+                    if (_knownKeys.Add(key))
+                    {
+                        var service = KnownServices.TryGetValue(result.Port, out var name) ? $" ({name})" : "";
+                        var statusText = result.Status == "open" ? "открыт" : "неопределённо (тишина)";
+                        var banner = !string.IsNullOrEmpty(result.Banner) ? $", баннер: «{result.Banner}»" : "";
+                        AddLog($"{result.Protocol.ToUpperInvariant()} порт {result.Port} {statusText}{service}{banner}",
+                            result.Status == "open" ? "ok" : "warn");
+                    }
+                }
+                if (!string.IsNullOrEmpty(status.Error) && status.Error != ErrorMessage)
+                {
+                    ErrorMessage = status.Error;
+                    AddLog(status.Error, "err");
+                }
+                if (!status.Running)
+                {
+                    IsScanning = false;
+                    ScanCompleted = true;
+                    AddLog(_cancelRequested
+                        ? "Сканирование отменено."
+                        : $"Сканирование завершено. Найдено: {Results.Count}.");
+                }
+            }
+            catch
+            {
+                // Во время запуска локальный сервер может быть временно занят — повторяем запрос.
+            }
+            if (_disposed) break;
+            try { await InvokeAsync(StateHasChanged); }
+            catch (InvalidOperationException) { break; } // рендерер уже уничтожен
+        }
+    }
+
+    private async Task CancelScan()
+    {
+        _cancelRequested = true;
+        AddLog("Отмена сканирования…", "dim");
+        try { await Http.PostAsync("api/scan/cancel", null); } catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        if (_helpReference != null)
+        {
+            try { await JS.InvokeVoidAsync("portScannerHelp.dispose"); }
+            catch (JSException) { }
+            catch (JSDisconnectedException) { }
+            _helpReference.Dispose();
+        }
+    }
+}

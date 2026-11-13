@@ -1,0 +1,15 @@
+# Сборка
+bin/
+obj/
+Приложение/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
