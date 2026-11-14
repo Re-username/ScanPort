@@ -1,7 +1,10 @@
 # Сборка
 bin/
 obj/
-Приложение/
+build/
+release/*.zip
+# в wwwroot сервера клиент копируется при сборке релиза
+src/PortScanner.Server/wwwroot/
 
 # Visual Studio / Rider
 .vs/
