@@ -73,6 +73,7 @@
         <label title="UDP: открыт при ответе; без ответа результат неопределён"><input type="checkbox" @bind="DoUdp" disabled="@IsScanning" /> UDP</label>
         <label title="Баннер — текстовый ответ службы: для TCP приветствие или ответ на HTTP-запрос, для UDP первый ответ на пробу"><input type="checkbox" @bind="DoBanner" disabled="@IsScanning" /> Баннер</label>
         <label title="Проверка ICMP при старте и далее каждые 5 секунд"><input type="checkbox" @bind="DoPing" disabled="@IsScanning" /> Ping (ICMP)</label>
+        <label title="Для узла в интернете: устанавливает таймаут 5 с, чтобы дальний хост успевал отвечать"><input type="checkbox" checked="@IsWan" @onchange="ToggleWan" disabled="@IsScanning" /> WAN</label>
     </div>
 </div>
 
@@ -269,6 +270,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     private bool DoUdp { get; set; }
     private bool DoBanner { get; set; }
     private bool DoPing { get; set; } = true;
+    private bool IsWan { get; set; }
 
     private bool IsScanning;
     private bool ScanCompleted;
@@ -536,8 +538,13 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
         _ = PollLoop();
     }
 
-    private string MethodsText()
+    private void ToggleWan(ChangeEventArgs e)
     {
+        IsWan = e.Value is bool b && b;
+        TimeoutMs = IsWan ? 5000 : 1000;
+    }
+
+    private string MethodsText()    {
         var list = new List<string>();
         if (DoTcp) list.Add("TCP");
         if (DoUdp) list.Add("UDP");
