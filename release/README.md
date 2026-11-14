@@ -4,7 +4,7 @@
 https://github.com/Re-username/ScanPort/releases
 
 - `PortScanner-web-v*.zip` — статический веб-сайт. Сам по себе не сканирует: нужен хост, который отвечает на `api/scan/*` (например, сервер из `src/PortScanner.Server`).
-- `ScanPort-app-windows-x64-v*.zip` — **приложение** для Windows (Windows 10 1809+): нативное окно, без браузера. Распаковать и запустить `ScanPort.exe`. Требуется WebView2 (есть в современной Windows 10/11).
+- `ScanPort-app-windows-x64-v*.exe` — **приложение** для Windows (Windows 10 1809+): **один файл**. SFX-лаунчер (как у FileChat): при первом запуске распаковывается в `%LOCALAPPDATA%\ScanPort\App` и открывает нативное окно. Требуется WebView2 (есть в современной Windows 10/11).
 - `ScanPort-android-v*.apk` — приложение для Android (Android 7.0+). Установить APK, разрешив установку из неизвестных источников.
 - `ScanPort-server-windows-x64-v*.zip` — сервер одним файлом: поднимает API и открывает интерфейс в браузере. Нужен, чтобы сканировать с других устройств в локальной сети. Флаги: `--no-browser`, `--urls`.
 
