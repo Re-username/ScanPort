@@ -47,6 +47,12 @@ public static class ScanApiCore
         return (200, "{}");
     }
 
+    public static (int Status, string Json) Pause(ScanService scans)
+    {
+        var paused = scans.TogglePause();
+        return (200, JsonSerializer.Serialize(new { paused }, JsonOptions));
+    }
+
     public static (int Status, string Json) Addresses() =>
         (200, JsonSerializer.Serialize(new { addresses = ScanService.GetLocalIPv4() }, JsonOptions));
 }

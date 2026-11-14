@@ -33,5 +33,11 @@ public static class ScanApi
             var (_, json) = ScanApiCore.Addresses();
             return Results.Content(json, "application/json; charset=utf-8");
         });
+
+        app.MapPost("/api/scan/pause", (ScanService scans) =>
+        {
+            var (_, json) = ScanApiCore.Pause(scans);
+            return Results.Content(json, "application/json; charset=utf-8");
+        });
     }
 }

@@ -64,6 +64,7 @@
         }
         else
         {
+            <button type="button" class="btn" @onclick="TogglePause" disabled="@_cancelRequested">@(IsPaused ? "▶ Продолжить" : "⏸ Пауза")</button>
             <button type="button" class="btn danger" @onclick="CancelScan">Отмена</button>
         }
     </div>
@@ -94,6 +95,10 @@
             {
                 <span> · @PingInfo</span>
             }
+            @if (IsPaused)
+            {
+                <span> · пауза</span>
+            }
         </div>
     </div>
 }
@@ -101,8 +106,8 @@
 @if (Results.Count > 0)
 {
     <div class="results-heading">
-        <h3><button type="button" class="collapse-btn" @onclick="() => ResultsVisible = !ResultsVisible">Найдено (@Results.Count) <span class="collapse-mark">@(ResultsVisible ? "▾" : "▸")</span></button></h3>
-        <span>Нажмите на заголовок столбца для сортировки</span>
+        <h3><button type="button" class="collapse-btn" @onclick="() => ResultsVisible = !ResultsVisible">Найдено (@SortedResults.Count()) <span class="collapse-mark">@(ResultsVisible ? "▾" : "▸")</span></button></h3>
+        <input class="filter-input" @bind="ResultsFilter" @bind:event="oninput" placeholder="Поиск по результатам…" title="Фильтр по порту, протоколу, статусу, названию службы" />
     </div>
     @if (ResultsVisible)
     {
@@ -257,6 +262,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
 
     private bool IsScanning;
     private bool ScanCompleted;
+    private bool IsPaused;
     private bool IsDark = true;
     private bool HelpVisible;
     private bool IpsVisible;
@@ -275,6 +281,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     private int TotalPorts;
     private string SortColumn = "port";
     private bool SortAscending = true;
+    private string ResultsFilter = "";
     private List<string> LocalIps = new();
     private readonly List<LogEntry> LogEntries = new();
     private DotNetObjectReference<Home>? _helpReference;
@@ -286,6 +293,9 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     {
         get
         {
+            var filtered = string.IsNullOrWhiteSpace(ResultsFilter)
+                ? Results
+                : Results.Where(r => MatchesFilter(r, ResultsFilter));
             Func<PortResult, object> key = SortColumn switch
             {
                 "protocol" => r => r.Protocol,
@@ -294,10 +304,20 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
                 _ => r => r.Port
             };
             var sorted = SortAscending
-                ? Results.OrderBy(key).ThenBy(r => r.Port).ThenBy(r => r.Protocol)
-                : Results.OrderByDescending(key).ThenByDescending(r => r.Port).ThenByDescending(r => r.Protocol);
+                ? filtered.OrderBy(key).ThenBy(r => r.Port).ThenBy(r => r.Protocol)
+                : filtered.OrderByDescending(key).ThenByDescending(r => r.Port).ThenByDescending(r => r.Protocol);
             return sorted;
         }
+    }
+
+    private static bool MatchesFilter(PortResult r, string filter)
+    {
+        var f = filter.Trim();
+        return r.Port.ToString().Contains(f, StringComparison.OrdinalIgnoreCase)
+            || r.Protocol.Contains(f, StringComparison.OrdinalIgnoreCase)
+            || r.Status.Contains(f, StringComparison.OrdinalIgnoreCase)
+            || StatusText(r.Status).Contains(f, StringComparison.OrdinalIgnoreCase)
+            || (!string.IsNullOrEmpty(r.Banner) && r.Banner.Contains(f, StringComparison.OrdinalIgnoreCase));
     }
 
     private sealed record LogEntry(string Time, string Text, string CssClass);
@@ -320,7 +340,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     };
 
     private sealed record ScanStartResponse(string? Error);
-    private sealed record ScanStatus(int Scanned, int Total, PortResult[]? Results, bool Running, string? Error, string? Ping);
+    private sealed record ScanStatus(int Scanned, int Total, PortResult[]? Results, bool Running, string? Error, string? Ping, bool Paused);
     private sealed record PortResult(int Port, string Protocol, string Status, string? Banner);
     private sealed record LocalAddressesResponse(List<string>? Addresses);
 
@@ -444,6 +464,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
         ScannedPorts = 0;
         TotalPorts = 0;
         ScanCompleted = false;
+        IsPaused = false;
         _cancelRequested = false;
         PingInfo = null;
         _pingLogged = null;
@@ -528,6 +549,11 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
                 TotalPorts = status.Total;
                 Results = status.Results?.ToList() ?? new List<PortResult>();
                 PingInfo = status.Ping;
+                if (status.Paused != IsPaused)
+                {
+                    IsPaused = status.Paused;
+                    AddLog(IsPaused ? "Сканирование приостановлено." : "Сканирование продолжено.", "dim");
+                }
                 if (!string.IsNullOrEmpty(status.Ping) && status.Ping != _pingLogged)
                 {
                     _pingLogged = status.Ping;
@@ -574,6 +600,11 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
         _cancelRequested = true;
         AddLog("Отмена сканирования…", "dim");
         try { await Http.PostAsync("api/scan/cancel", null); } catch { }
+    }
+
+    private async Task TogglePause()
+    {
+        try { await Http.PostAsync("api/scan/pause", null); } catch { }
     }
 
     public async ValueTask DisposeAsync()

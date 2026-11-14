@@ -19,7 +19,7 @@ public sealed class ScanService
 
     public sealed record ScanStatus(
         int Scanned, int Total, IReadOnlyList<PortResult> Results,
-        bool Running, string? Error, string? Ping);
+        bool Running, string? Error, string? Ping, bool Paused);
 
     private static readonly HashSet<int> WebPorts = new()
         { 80, 81, 82, 83, 88, 3000, 3128, 5000, 5080, 8000, 8008, 8080, 8081, 8888, 9000, 10000 };
@@ -35,6 +35,7 @@ public sealed class ScanService
     private int _scanned;
     private int _total;
     private bool _running;
+    private volatile bool _paused;
     private string? _error;
     private string? _ping;
 
@@ -56,8 +57,15 @@ public sealed class ScanService
             return "Выберите хотя бы один метод: TCP и/или UDP.";
 
         _cts = new CancellationTokenSource();
+        _paused = false;
         _ = Task.Run(() => RunAsync(req, _cts.Token));
         return null;
+    }
+
+    public bool TogglePause()
+    {
+        _paused = !_paused;
+        return _paused;
     }
 
     public ScanStatus GetStatus()
@@ -66,7 +74,7 @@ public sealed class ScanService
         {
             // порядок не важен: клиент сортирует для отображения сам.
             // Сортировка здесь на каждый опрос — лишняя работа при тысячах результатов.
-            return new ScanStatus(_scanned, _total, _results.ToArray(), _running, _error, _ping);
+            return new ScanStatus(_scanned, _total, _results.ToArray(), _running, _error, _ping, _paused);
         }
     }
 
@@ -87,7 +95,6 @@ public sealed class ScanService
             _ping = null;
             _running = true;
         }
-
         IPAddress[] ips;
         try
         {
@@ -128,6 +135,10 @@ public sealed class ScanService
                 {
                     try
                     {
+                        // пауза: не запускаем новые проверки, уже идущие завершаются
+                        while (_paused && !token.IsCancellationRequested)
+                            await Task.Delay(150, token);
+
                         PortResult? result = check.Proto == "tcp"
                             ? await CheckTcpAsync(ips, check.Port, req.TimeoutMs, req.Banner, token)
                             : await CheckUdpAsync(ips, check.Port, req.TimeoutMs, token);

@@ -81,6 +81,7 @@ public sealed class MiniHttpServer
                     ("POST", "/api/scan/start") => ScanApiCore.Start(_scans, body ?? ""),
                     ("GET", "/api/scan/status") => ScanApiCore.Status(_scans),
                     ("POST", "/api/scan/cancel") => ScanApiCore.Cancel(_scans),
+                    ("POST", "/api/scan/pause") => ScanApiCore.Pause(_scans),
                     ("GET", "/api/scan/addresses") => ScanApiCore.Addresses(),
                     ("OPTIONS", _) => (200, "{}"),
                     _ => (404, """{"error":"not found"}"""),
