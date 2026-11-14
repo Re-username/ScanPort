@@ -70,7 +70,7 @@
     <div class="checks">
         <label title="TCP: открыт, если удалось установить соединение"><input type="checkbox" @bind="DoTcp" disabled="@IsScanning" /> TCP</label>
         <label title="UDP: открыт при ответе; без ответа результат неопределён"><input type="checkbox" @bind="DoUdp" disabled="@IsScanning" /> UDP</label>
-        <label title="Баннер — текстовый ответ службы после подключения или запроса"><input type="checkbox" @bind="DoBanner" disabled="@IsScanning" /> Баннер</label>
+        <label title="Баннер — текстовый ответ службы: для TCP приветствие или ответ на HTTP-запрос, для UDP первый ответ на пробу"><input type="checkbox" @bind="DoBanner" disabled="@IsScanning" /> Баннер</label>
         <label title="Проверка ICMP при старте и далее каждые 5 секунд"><input type="checkbox" @bind="DoPing" disabled="@IsScanning" /> Ping (ICMP)</label>
     </div>
 </div>
@@ -218,7 +218,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
                 <section>
                     <h3>Что такое баннер</h3>
                     <p><strong>Баннер — это текстовый ответ программы, которая работает на открытом порту.</strong> Например: <code>SSH-2.0-OpenSSH_9.6</code>, <code>220 FTP ready</code> или <code>HTTP/1.1 200 OK · Server: nginx</code>.</p>
-                    <p>Сканер сначала ждёт приветствие службы. Для типичных веб-портов дополнительно отправляет HTTP-запрос <code>HEAD /</code>. Пустой баннер — это нормально: многие службы не сообщают название или используют шифрование. <strong>Отсутствие баннера не означает, что порт закрыт.</strong></p>
+                    <p>Сканер сначала ждёт приветствие службы. Для типичных веб-портов дополнительно отправляет HTTP-запрос <code>HEAD /</code>. Для UDP баннер — это первый ответ службы на пробную датаграмму. Пустой баннер — это нормально: многие службы не сообщают название или используют шифрование. <strong>Отсутствие баннера не означает, что порт закрыт.</strong></p>
                 </section>
                 <section>
                     <h3>TCP, UDP и ping</h3>
@@ -468,11 +468,6 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
         if (!DoTcp && !DoUdp)
         {
             ErrorMessage = "Выберите хотя бы один метод: TCP и/или UDP.";
-            return;
-        }
-        if (DoBanner && !DoTcp)
-        {
-            ErrorMessage = "Захват баннера работает только вместе с TCP.";
             return;
         }
 

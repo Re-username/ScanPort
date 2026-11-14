@@ -340,8 +340,9 @@ public sealed class ScanService
             udp.Connect(ip, port);
             await udp.SendAsync(UdpProbe, UdpProbe.Length);
             var result = await udp.ReceiveAsync().WaitAsync(timeout, ct);
-            var banner = Sanitize(Encoding.UTF8.GetString(result.Buffer, 0, Math.Min(result.Buffer.Length, 256)));
-            return ("open", banner);
+            var raw = Encoding.UTF8.GetString(result.Buffer, 0, Math.Min(result.Buffer.Length, 256));
+            var printable = new string(raw.Where(c => !char.IsControl(c)).ToArray());
+            return ("open", Sanitize(printable));
         }
         catch
         {
