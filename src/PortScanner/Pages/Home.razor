@@ -10,17 +10,41 @@
 <div class="header">
     <h1>Сканер открытых портов</h1>
     <button type="button" class="btn" @onclick="OpenHelp" title="Открыть справку (F1)">F1 · Справка</button>
+    <button type="button" class="btn" @onclick="ToggleIps" title="IP-адреса этого устройства">🖧 IP устройства</button>
     <button type="button" class="btn" @onclick="ToggleTheme" title="Переключить тему">@(IsDark ? "☀ Светлая" : "☾ Тёмная")</button>
 </div>
+
+@if (IpsVisible)
+{
+    <div class="ips-panel">
+        <div class="ips-heading">
+            <h4>IP этого устройства</h4>
+            <button type="button" class="btn btn-small" @onclick="() => IpsVisible = false" title="Закрыть">✕</button>
+        </div>
+        @if (LocalIps.Count > 0)
+        {
+            <ul>
+                @foreach (var ip in LocalIps)
+                {
+                    <li><button type="button" class="ip-item" @onclick="() => CopyIp(ip)" title="Скопировать">@ip @if (CopiedIp == ip)
+                    {
+                        <span class="ip-copied">✓ скопировано</span>
+                    }</button></li>
+                }
+            </ul>
+            <p class="ips-note">Нажмите на адрес, чтобы скопировать. Несколько адресов — несколько сетей (Wi-Fi, Ethernet, VPN); удалённое устройство должно быть в одной из них.</p>
+        }
+        else
+        {
+            <p class="ips-note">Не удалось определить IP-адреса устройства.</p>
+        }
+    </div>
+}
 
 <div class="form-grid">
     <label>
         IP-адрес или хост
         <input @bind="Host" placeholder="192.168.1.1" disabled="@IsScanning" />
-        @if (LocalIps.Count > 0)
-        {
-            <span class="local-ips">Это устройство: @string.Join(" · ", LocalIps)</span>
-        }
     </label>
     <label>
         Порт от
@@ -230,6 +254,8 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     private bool ScanCompleted;
     private bool IsDark = true;
     private bool HelpVisible;
+    private bool IpsVisible;
+    private string? CopiedIp;
     private bool _focusHelp;
     private bool _cancelRequested;
     private bool _disposed;
@@ -326,6 +352,21 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     {
         IsDark = !IsDark;
         await JS.InvokeVoidAsync("setTheme", IsDark ? "dark" : "light");
+    }
+
+    private void ToggleIps() => IpsVisible = !IpsVisible;
+
+    private async Task CopyIp(string ip)
+    {
+        try
+        {
+            await JS.InvokeAsync<object>("navigator.clipboard.writeText", ip);
+            CopiedIp = ip;
+            await Task.Delay(1200);
+            if (CopiedIp == ip)
+                CopiedIp = null;
+        }
+        catch { }
     }
 
     private async Task OpenHelp()
