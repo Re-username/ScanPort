@@ -4,6 +4,7 @@ obj/
 build/
 release/*.zip
 release/*.apk
+release/*.exe
 # в wwwroot сервера клиент копируется при сборке релиза
 src/PortScanner.Server/wwwroot/
 
