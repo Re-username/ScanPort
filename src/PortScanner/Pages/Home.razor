@@ -554,10 +554,15 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
                     IsPaused = status.Paused;
                     AddLog(IsPaused ? "Сканирование приостановлено." : "Сканирование продолжено.", "dim");
                 }
-                if (!string.IsNullOrEmpty(status.Ping) && status.Ping != _pingLogged)
+                // в журнал пишем только смену состояния (отвечает/молчит) — иначе каждые 5 с
+                // спам от изменения миллисекунд; полный текст с временем живёт в строке прогресса
+                var pingState = string.IsNullOrEmpty(status.Ping)
+                    ? null
+                    : (status.Ping.StartsWith("Хост отвечает") ? "ok" : "fail");
+                if (pingState != null && pingState != _pingLogged)
                 {
-                    _pingLogged = status.Ping;
-                    AddLog(status.Ping, status.Ping.StartsWith("Хост отвечает") ? "ok" : "dim");
+                    _pingLogged = pingState;
+                    AddLog(status.Ping, pingState == "ok" ? "ok" : "dim");
                 }
                 foreach (var result in Results)
                 {

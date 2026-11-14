@@ -172,27 +172,29 @@ public sealed class ScanService
                     {
                         using var ping = new Ping();
                         var reply = await ping.SendPingAsync(ip, Math.Min(timeoutMs, 2000));
-                        return reply.Status == IPStatus.Success ? ip : null;
+                        return reply.Status == IPStatus.Success ? (ip, reply.RoundtripTime) : ((IPAddress?)null, 0L);
                     }
                     catch
                     {
-                        return null;
+                        return ((IPAddress?)null, 0L);
                     }
                 }).ToList();
 
                 IPAddress? alive = null;
+                long rtt = 0;
                 foreach (var task in tasks)
                 {
-                    var ip = await task;
+                    var (ip, time) = await task;
                     if (ip is not null)
                     {
                         alive = ip;
+                        rtt = time;
                         break;
                     }
                 }
 
                 text = alive is not null
-                    ? $"Хост отвечает на ping · {alive}"
+                    ? $"Хост отвечает на ping, {rtt} мс · {alive}"
                     : "Хост не отвечает на ping (ICMP может быть запрещён)";
             }
             catch (Exception ex)
