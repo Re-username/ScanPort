@@ -1,4 +1,4 @@
-# Сборка APK для Android. Запуск из корня репозитория:
+﻿# Сборка APK для Android. Запуск из корня репозитория:
 #   powershell -ExecutionPolicy Bypass -File tools/build-android.ps1
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
