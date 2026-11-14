@@ -256,17 +256,27 @@ public sealed class ScanService
     private static async Task<TcpClient?> TryConnectAsync(
         IPAddress ip, int port, TimeSpan timeout, CancellationToken ct)
     {
-        var tcp = new TcpClient(ip.AddressFamily);
-        try
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            await tcp.ConnectAsync(ip, port, ct).AsTask().WaitAsync(timeout, ct);
-            return tcp;
+            var tcp = new TcpClient(ip.AddressFamily);
+            try
+            {
+                await tcp.ConnectAsync(ip, port, ct).AsTask().WaitAsync(timeout, ct);
+                return tcp;
+            }
+            catch (TimeoutException) when (attempt == 0)
+            {
+                // Таймаут — не отказ. На нестабильных каналах (интернет) пакет мог потеряться,
+                // а порт на самом деле открыт: одна повторная попытка. Отказ (RST) не повторяем.
+                tcp.Dispose();
+            }
+            catch
+            {
+                tcp.Dispose();
+                return null;
+            }
         }
-        catch
-        {
-            tcp.Dispose();
-            return null;
-        }
+        return null;
     }
 
     private static async Task<string?> ReadBannerAsync(
