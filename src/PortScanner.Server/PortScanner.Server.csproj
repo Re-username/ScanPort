@@ -5,16 +5,27 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Версия приложения: единственное место -->
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
     <AssemblyName>ScanPort</AssemblyName>
     <RootNamespace>PortScanner.Server</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- exe для локального запуска, не для IIS: не генерировать web.config -->
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+    <!-- манифест для ManifestEmbeddedFileProvider (сайт из ресурсов в single-file exe) -->
+    <GenerateEmbeddedFilesManifest>true</GenerateEmbeddedFilesManifest>
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.FileProviders.Embedded" Version="8.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- wwwroot сервер получает при сборке релиза; дополнительно встраивается в exe
+         как ресурсы — в single-file публикации сайт отдаётся из сборки, без папки на диске -->
     <Content Remove="wwwroot\**" />
     <None Remove="wwwroot\**" />
-    <Content Include="wwwroot\**" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="wwwroot\**" CopyToPublishDirectory="Never" />
+    <EmbeddedResource Include="wwwroot\**" />
   </ItemGroup>
 
 </Project>

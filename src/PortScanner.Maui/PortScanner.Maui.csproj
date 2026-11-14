@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0-android</TargetFrameworks>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>PortScanner.Maui</RootNamespace>
+    <UseMaui>true</UseMaui>
+    <SingleProject>true</SingleProject>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCssItems>false</EnableDefaultCssItems>
+
+    <!-- Display name -->
+    <ApplicationTitle>ScanPort</ApplicationTitle>
+
+    <!-- App Identifier -->
+    <ApplicationId>com.scanport.app</ApplicationId>
+    <AssemblyName>ScanPort</AssemblyName>
+
+    <!-- Versions -->
+    <ApplicationDisplayVersion>1.3.0</ApplicationDisplayVersion>
+    <ApplicationVersion>3</ApplicationVersion>
+
+    <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
+
+    <!-- Автономный APK: все сборки внутри, без fast deployment -->
+    <EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>
+    <AndroidUseFastDeployment>false</AndroidUseFastDeployment>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Maui.Controls" Version="10.0.110" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebView.Maui" Version="10.0.110" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Общий UI с веб-клиентом (src/PortScanner) -->
+    <Content Include="..\PortScanner\wwwroot\css\app.css" Link="wwwroot\css\app.css" />
+    <Content Include="..\PortScanner\wwwroot\favicon.ico" Link="wwwroot\favicon.ico" />
+    <RazorComponent Include="..\PortScanner\App.razor" Link="App.razor" />
+    <RazorComponent Include="..\PortScanner\_Imports.razor" Link="_Imports.razor" />
+    <RazorComponent Include="..\PortScanner\Pages\Home.razor" Link="Pages\Home.razor" />
+    <RazorComponent Include="..\PortScanner\Layout\MainLayout.razor" Link="Layout\MainLayout.razor" />
+    <!-- Общий движок сканирования и ядро API с десктопным сервером (src/PortScanner.Server) -->
+    <Compile Include="..\PortScanner.Server\ScanService.cs" Link="Core\ScanService.cs" />
+    <Compile Include="..\PortScanner.Server\ScanApiCore.cs" Link="Core\ScanApiCore.cs" />
+  </ItemGroup>
+
+</Project>

@@ -13,31 +13,18 @@ builder.Services.AddSingleton<ScanService>();
 var app = builder.Build();
 
 var webRoot = Path.Combine(AppContext.BaseDirectory, "wwwroot");
-if (Directory.Exists(webRoot))
-{
-    var files = new PhysicalFileProvider(webRoot);
-    app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = files });
-    app.UseStaticFiles(new StaticFileOptions { FileProvider = files });
-    app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = files });
-}
-else
-{
-    app.Logger.LogWarning("wwwroot не найден рядом с приложением — веб-интерфейс недоступен.");
-}
+// В одиночном exe (single-file) папки wwwroot рядом нет — сайт отдаём из встроенных ресурсов сборки
+var files = Directory.Exists(webRoot)
+    ? (IFileProvider)new PhysicalFileProvider(webRoot)
+    : new ManifestEmbeddedFileProvider(typeof(Program).Assembly, "wwwroot");
+if (!Directory.Exists(webRoot))
+    app.Logger.LogInformation("Веб-интерфейс отдаётся из ресурсов сборки (single-file).");
 
-app.MapPost("/api/scan/start", (ScanService scans, ScanService.ScanRequest req) =>
-{
-    var error = scans.Start(req);
-    return Results.Json(new { error });
-});
+app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = files });
+app.UseStaticFiles(new StaticFileOptions { FileProvider = files });
+app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = files });
 
-app.MapGet("/api/scan/status", (ScanService scans) => Results.Json(scans.GetStatus()));
-
-app.MapPost("/api/scan/cancel", (ScanService scans) =>
-{
-    scans.Cancel();
-    return Results.Ok();
-});
+ScanApi.Map(app);
 
 var url = app.Urls.FirstOrDefault() ?? "http://127.0.0.1:5080";
 Console.WriteLine($"Сканер портов запущен: {url}  (Ctrl+C — выход)");

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Сканер портов</title>
+    <base href="./" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+    <script>
+        // Тема до отрисовки, чтобы не было вспышки светлой темы
+        (function () {
+            var t = null;
+            try { t = localStorage.getItem("portscan-theme"); } catch (e) { }
+            if (t !== "dark" && t !== "light") t = "dark";
+            if (t === "dark") document.documentElement.classList.add("dark");
+            else document.documentElement.classList.remove("dark");
+        })();
+        window.getTheme = function () {
+            try { return localStorage.getItem("portscan-theme") || "dark"; } catch (e) { return "dark"; }
+        };
+        window.setTheme = function (t) {
+            if (t === "dark") document.documentElement.classList.add("dark");
+            else document.documentElement.classList.remove("dark");
+            try { localStorage.setItem("portscan-theme", t); } catch (e) { }
+        };
+
+        // F1 и Esc обрабатываются на уровне окна, включая поля ввода.
+        window.portScannerHelp = (function () {
+            var reference = null;
+            function onKeyDown(event) {
+                if (!reference) return;
+                if (event.key === "F1") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    reference.invokeMethodAsync("ShowHelpFromHotkey");
+                } else if (event.key === "Escape") {
+                    reference.invokeMethodAsync("CloseHelpFromHotkey");
+                }
+            }
+            return {
+                init: function (dotNetReference) {
+                    if (reference) window.removeEventListener("keydown", onKeyDown, true);
+                    reference = dotNetReference;
+                    window.addEventListener("keydown", onKeyDown, true);
+                },
+                dispose: function () {
+                    window.removeEventListener("keydown", onKeyDown, true);
+                    reference = null;
+                }
+            };
+        })();
+    </script>
+</head>
+
+<body>
+    <div id="app">
+        <div class="loading-screen">
+            <div class="spinner"></div>
+            <div>Загрузка сканера портов…</div>
+        </div>
+    </div>
+    <script src="_framework/blazor.webview.js"></script>
+</body>
+
+</html>
