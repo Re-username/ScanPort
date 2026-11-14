@@ -64,10 +64,9 @@ public sealed class ScanService
     {
         lock (_gate)
         {
-            var results = _results.ToArray();
-            Array.Sort(results, static (a, b) =>
-                a.Port != b.Port ? a.Port.CompareTo(b.Port) : string.CompareOrdinal(a.Protocol, b.Protocol));
-            return new ScanStatus(_scanned, _total, results, _running, _error, _ping);
+            // порядок не важен: клиент сортирует для отображения сам.
+            // Сортировка здесь на каждый опрос — лишняя работа при тысячах результатов.
+            return new ScanStatus(_scanned, _total, _results.ToArray(), _running, _error, _ping);
         }
     }
 

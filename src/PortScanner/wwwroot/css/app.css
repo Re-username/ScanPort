@@ -91,7 +91,7 @@ button, input { font-family: inherit; }
   margin: 0 auto;
   padding: 14px 16px 12px;
   gap: 14px;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .header {
@@ -289,13 +289,11 @@ tr:last-child td { border-bottom: none; }
 td.open-port { color: var(--ok); font-family: Consolas, monospace; }
 
 /* ---- Лог ---- */
-.log-wrap { flex: 1; min-height: 120px; display: flex; flex-direction: column; gap: 6px; }
+.log-wrap { flex: 1 1 0; min-height: 90px; display: flex; flex-direction: column; gap: 6px; }
 
 .log {
   flex: 1;
-  min-height: 180px;
-  max-height: 380px;
-  resize: vertical;
+  min-height: 0;
   overflow: auto;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -360,13 +358,29 @@ input:focus-visible {
   font-size: 12px;
 }
 
+/* Раскрываемые секции «Найдено» и «Журнал» */
+.collapse-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.collapse-btn:hover { color: var(--accent); }
+.collapse-mark { font-size: .8em; color: var(--text-soft); }
+
 .results-table {
-  max-height: 380px;
+  flex: 1 1 0;
+  min-height: 90px;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--panel);
-  flex: none;
 }
 
 .results-table table { border: 0; }

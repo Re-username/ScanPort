@@ -101,9 +101,11 @@
 @if (Results.Count > 0)
 {
     <div class="results-heading">
-        <h3>Найдено (@Results.Count)</h3>
+        <h3><button type="button" class="collapse-btn" @onclick="() => ResultsVisible = !ResultsVisible">Найдено (@Results.Count) <span class="collapse-mark">@(ResultsVisible ? "▾" : "▸")</span></button></h3>
         <span>Нажмите на заголовок столбца для сортировки</span>
     </div>
+    @if (ResultsVisible)
+    {
     <div class="results-table">
         <table>
             <thead>
@@ -135,6 +137,7 @@
             </tbody>
         </table>
     </div>
+    }
 }
 else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
 {
@@ -146,9 +149,11 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
 
 <div class="log-wrap">
     <div class="log-heading">
-        <h3>Журнал <span class="log-count">@LogEntries.Count / @MaxLogEntries</span></h3>
+        <h3><button type="button" class="collapse-btn" @onclick="() => LogVisible = !LogVisible">Журнал <span class="log-count">@LogEntries.Count / @MaxLogEntries</span> <span class="collapse-mark">@(LogVisible ? "▾" : "▸")</span></button></h3>
         <button type="button" class="btn btn-small" @onclick="ClearLog" disabled="@(LogEntries.Count == 0)">Очистить</button>
     </div>
+    @if (LogVisible)
+    {
     <div class="log" aria-live="polite">
         @if (LogEntries.Count == 0)
         {
@@ -162,6 +167,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
             }
         }
     </div>
+    }
 </div>
 
 @if (HelpVisible)
@@ -254,6 +260,8 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     private bool IsDark = true;
     private bool HelpVisible;
     private bool IpsVisible;
+    private bool ResultsVisible = true;
+    private bool LogVisible = true;
     private string? CopiedIp;
     private bool _focusHelp;
     private bool _cancelRequested;
@@ -328,9 +336,13 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     {
         if (firstRender)
         {
-            IsDark = await JS.InvokeAsync<string>("getTheme") != "light";
-            _helpReference = DotNetObjectReference.Create(this);
-            await JS.InvokeVoidAsync("portScannerHelp.init", _helpReference);
+            try
+            {
+                IsDark = await JS.InvokeAsync<string>("getTheme") != "light";
+                _helpReference = DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("portScannerHelp.init", _helpReference);
+            }
+            catch (Exception ex) when (ex is JSException or InvalidOperationException or JSDisconnectedException) { }
             try
             {
                 var ips = await Http.GetFromJsonAsync<LocalAddressesResponse>("api/scan/addresses");
@@ -384,17 +396,22 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     [JSInvokable]
     public async Task ShowHelpFromHotkey()
     {
-        await InvokeAsync(async () => await OpenHelp());
+        try { await InvokeAsync(OpenHelp); }
+        catch (InvalidOperationException) { }
     }
 
     [JSInvokable]
     public async Task CloseHelpFromHotkey()
     {
-        await InvokeAsync(() =>
+        try
         {
-            CloseHelp();
-            StateHasChanged();
-        });
+            await InvokeAsync(() =>
+            {
+                CloseHelp();
+                StateHasChanged();
+            });
+        }
+        catch (InvalidOperationException) { }
     }
 
     private void SortBy(string column)
@@ -572,6 +589,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
             try { await JS.InvokeVoidAsync("portScannerHelp.dispose"); }
             catch (JSException) { }
             catch (JSDisconnectedException) { }
+            catch (InvalidOperationException) { }
             _helpReference.Dispose();
         }
     }
