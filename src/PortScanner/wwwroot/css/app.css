@@ -533,3 +533,13 @@ input:focus-visible {
   font-size: .85rem;
 }
 .filter-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+/* Свёрнутый журнал не занимает место — оставшаяся секция расширяется на всю страницу */
+.log-wrap.collapsed { flex: 0 0 auto; min-height: 0; }
+
+/* Подложка липкой шапки таблицы (sticky уже задан, без фона строки просвечивали) */
+.results-table thead th { background: var(--panel); }
+
+/* Галочка «только открытые» и кнопка «Копировать» в заголовке результатов */
+.open-only { display: flex; align-items: center; gap: 5px; font-size: .8rem; color: var(--text-soft); white-space: nowrap; }
+.results-heading { gap: 10px; }

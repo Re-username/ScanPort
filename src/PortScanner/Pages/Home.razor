@@ -108,7 +108,9 @@
 {
     <div class="results-heading">
         <h3><button type="button" class="collapse-btn" @onclick="() => ResultsVisible = !ResultsVisible">Найдено (@SortedResults.Count()) <span class="collapse-mark">@(ResultsVisible ? "▾" : "▸")</span></button></h3>
-        <input class="filter-input" @bind="ResultsFilter" @bind:event="oninput" placeholder="Поиск по результатам…" title="Фильтр по порту, протоколу, статусу, названию службы" />
+        <label class="open-only" title="Показывать только порты со статусом «открыт»"><input type="checkbox" @bind="OnlyOpen" /> только открытые</label>
+        <button type="button" class="btn btn-small" @onclick="CopyResults" disabled="@(Results.Count == 0)" title="Скопировать таблицу (порт, протокол, статус, сервис) в буфер обмена">@(_resultsCopied ? "✓ скопировано" : "Копировать")</button>
+        <input class="filter-input" @bind="ResultsFilter" @bind:event="oninput" placeholder="Поиск по результатам…" title="Поиск по порту, протоколу, статусу, названию службы или баннеру" />
     </div>
     @if (ResultsVisible)
     {
@@ -153,7 +155,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     </div>
 }
 
-<div class="log-wrap">
+<div class="log-wrap@(LogVisible ? "" : " collapsed")">
     <div class="log-heading">
         <h3><button type="button" class="collapse-btn" @onclick="() => LogVisible = !LogVisible">Журнал <span class="log-count">@LogEntries.Count / @MaxLogEntries</span> <span class="collapse-mark">@(LogVisible ? "▾" : "▸")</span></button></h3>
         <button type="button" class="btn btn-small" @onclick="ClearLog" disabled="@(LogEntries.Count == 0)">Очистить</button>
@@ -294,6 +296,8 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     private string SortColumn = "port";
     private bool SortAscending = true;
     private string ResultsFilter = "";
+    private bool OnlyOpen;
+    private bool _resultsCopied;
     private List<string> LocalIps = new();
     private readonly List<LogEntry> LogEntries = new();
     private DotNetObjectReference<Home>? _helpReference;
@@ -305,9 +309,11 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     {
         get
         {
-            var filtered = string.IsNullOrWhiteSpace(ResultsFilter)
-                ? Results
-                : Results.Where(r => MatchesFilter(r, ResultsFilter));
+            var filtered = OnlyOpen
+                ? Results.Where(r => r.Status == "open")
+                : Results;
+            if (!string.IsNullOrWhiteSpace(ResultsFilter))
+                filtered = filtered.Where(r => MatchesFilter(r, ResultsFilter));
             Func<PortResult, object> key = SortColumn switch
             {
                 "protocol" => r => r.Protocol,
@@ -329,7 +335,24 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
             || r.Protocol.Contains(f, StringComparison.OrdinalIgnoreCase)
             || r.Status.Contains(f, StringComparison.OrdinalIgnoreCase)
             || StatusText(r.Status).Contains(f, StringComparison.OrdinalIgnoreCase)
-            || (!string.IsNullOrEmpty(r.Banner) && r.Banner.Contains(f, StringComparison.OrdinalIgnoreCase));
+            // BannerText: реальный баннер или название службы из справочника (VNC, SMB, …)
+            || BannerText(r).Contains(f, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task CopyResults()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Порт\tПротокол\tСтатус\tСервис / баннер");
+        foreach (var r in SortedResults)
+            sb.AppendLine($"{r.Port}\t{r.Protocol.ToUpperInvariant()}\t{StatusText(r.Status)}\t{BannerText(r)}");
+        try
+        {
+            await JS.InvokeAsync<object>("navigator.clipboard.writeText", sb.ToString());
+            _resultsCopied = true;
+            await Task.Delay(1200);
+            _resultsCopied = false;
+        }
+        catch { }
     }
 
     private sealed record LogEntry(string Time, string Text, string CssClass);
