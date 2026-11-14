@@ -469,3 +469,6 @@ input:focus-visible {
   .progress-bar { transition: none; }
   .progress-bar.animated, .loading-screen .spinner { animation: none; }
 }
+
+/* IP-адреса этого устройства под полем ввода хоста */
+.local-ips { display: block; font-size: 12px; color: var(--text-soft); margin-top: 4px; }

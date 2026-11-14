@@ -1,8 +1,8 @@
-﻿# Сборка APK для Android. Запуск из корня репозитория:
+﻿﻿# Сборка APK для Android. Запуск из корня репозитория:
 #   powershell -ExecutionPolicy Bypass -File tools/build-android.ps1
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$ver = '1.4.1'
+$ver = '1.4.2'
 
 # Тулчейн (пути как в проекте filechat)
 $env:JAVA_HOME = 'D:\android-tools\jdk-17'

@@ -17,6 +17,10 @@
     <label>
         IP-адрес или хост
         <input @bind="Host" placeholder="192.168.1.1" disabled="@IsScanning" />
+        @if (LocalIps.Count > 0)
+        {
+            <span class="local-ips">Это устройство: @string.Join(" · ", LocalIps)</span>
+        }
     </label>
     <label>
         Порт от
@@ -155,6 +159,24 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
                     </ol>
                 </section>
                 <section>
+                    <h3>IP этого устройства</h3>
+                    @if (LocalIps.Count > 0)
+                    {
+                        <p>Адреса этого устройства в сети:</p>
+                        <ul>
+                            @foreach (var ip in LocalIps)
+                            {
+                                <li><code>@ip</code></li>
+                            }
+                        </ul>
+                        <p>Адресов может быть несколько, если устройство подключено к нескольким сетям (Wi-Fi, Ethernet, VPN). Удалённое устройство должно быть в одной из этих сетей — сканируйте его адрес из соответствующей подсети.</p>
+                    }
+                    else
+                    {
+                        <p>Не удалось определить IP-адреса этого устройства.</p>
+                    }
+                </section>
+                <section>
                     <h3>Диапазон портов</h3>
                     <p>Допустимы значения от <strong>1 до 65535</strong>, границы входят в проверку. Порт «от» не может быть больше порта «до».</p>
                     <ul>
@@ -220,6 +242,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     private int TotalPorts;
     private string SortColumn = "port";
     private bool SortAscending = true;
+    private List<string> LocalIps = new();
     private readonly List<LogEntry> LogEntries = new();
     private DotNetObjectReference<Home>? _helpReference;
     private ElementReference HelpCloseButton;
@@ -266,6 +289,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     private sealed record ScanStartResponse(string? Error);
     private sealed record ScanStatus(int Scanned, int Total, PortResult[]? Results, bool Running, string? Error, string? Ping);
     private sealed record PortResult(int Port, string Protocol, string Status, string? Banner);
+    private sealed record LocalAddressesResponse(List<string>? Addresses);
 
     private static string StatusText(string status) => status == "open" ? "открыт" : "неопределённо";
 
@@ -282,6 +306,12 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
             IsDark = await JS.InvokeAsync<string>("getTheme") != "light";
             _helpReference = DotNetObjectReference.Create(this);
             await JS.InvokeVoidAsync("portScannerHelp.init", _helpReference);
+            try
+            {
+                var ips = await Http.GetFromJsonAsync<LocalAddressesResponse>("api/scan/addresses");
+                LocalIps = ips?.Addresses ?? new List<string>();
+            }
+            catch { /* API может быть ещё не поднят — подсказка не критична */ }
             StateHasChanged();
         }
 

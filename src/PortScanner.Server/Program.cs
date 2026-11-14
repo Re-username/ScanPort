@@ -5,8 +5,10 @@ using PortScanner.Server;
 Console.OutputEncoding = System.Text.Encoding.UTF8;
 
 var builder = WebApplication.CreateBuilder(args);
+// Слушаем все интерфейсы: к серверу могут подключаться другие устройства в локальной сети.
+// Ограничить только этим компьютером можно: ScanPort.exe --urls http://127.0.0.1:5080
 if (string.IsNullOrEmpty(builder.Configuration["Urls"]))
-    builder.WebHost.UseUrls("http://127.0.0.1:5080");
+    builder.WebHost.UseUrls("http://0.0.0.0:5080");
 
 builder.Services.AddSingleton<ScanService>();
 
@@ -26,8 +28,12 @@ app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = files
 
 ScanApi.Map(app);
 
-var url = app.Urls.FirstOrDefault() ?? "http://127.0.0.1:5080";
+var url = app.Urls.FirstOrDefault() ?? "http://0.0.0.0:5080";
 Console.WriteLine($"Сканер портов запущен: {url}  (Ctrl+C — выход)");
+var localIps = ScanService.GetLocalIPv4();
+if (localIps.Count > 0)
+    Console.WriteLine($"Этот компьютер в сети: {string.Join(", ", localIps)}");
+Console.WriteLine("Другие устройства в LAN могут открыть эту страницу по любому из этих адресов.");
 if (!args.Contains("--no-browser"))
 {
     try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -9,11 +10,10 @@ namespace PortScanner.Maui.Core.Net;
 /// Минимальный HTTP-сервер для локального API сканирования внутри приложения.
 /// Kestrel недоступен на Android (нет runtime pack Microsoft.AspNetCore.App),
 /// поэтому обрабатываем три endpoint'а api/scan/* напрямую через TcpListener.
+/// Поддерживает Content-Length и chunked (так .NET HttpClient шлёт POST).
 /// </summary>
 public sealed class MiniHttpServer
 {
-    private static readonly byte[] HeaderSeparator = { 13, 10, 13, 10 };
-
     private readonly ScanService _scans;
     private TcpListener? _listener;
 
@@ -71,8 +71,8 @@ public sealed class MiniHttpServer
         {
             try
             {
-                var stream = client.GetStream();
-                var (method, path, body) = await ReadRequestAsync(stream);
+                var reader = new RequestReader(client.GetStream());
+                var (method, path, body) = await reader.ReadRequestAsync();
                 if (method is null)
                     return;
 
@@ -81,68 +81,18 @@ public sealed class MiniHttpServer
                     ("POST", "/api/scan/start") => ScanApiCore.Start(_scans, body ?? ""),
                     ("GET", "/api/scan/status") => ScanApiCore.Status(_scans),
                     ("POST", "/api/scan/cancel") => ScanApiCore.Cancel(_scans),
+                    ("GET", "/api/scan/addresses") => ScanApiCore.Addresses(),
                     ("OPTIONS", _) => (200, "{}"),
                     _ => (404, """{"error":"not found"}"""),
                 };
 
-                await WriteResponseAsync(stream, status, json);
+                await WriteResponseAsync(client.GetStream(), status, json);
             }
             catch
             {
                 // один сломанный запрос не должен ронять сервер
             }
         }
-    }
-
-    private static async Task<(string? Method, string Path, string? Body)> ReadRequestAsync(NetworkStream stream)
-    {
-        var buffer = new byte[8192];
-        var data = new List<byte>();
-        var headerEnd = -1;
-
-        while (headerEnd < 0 && data.Count < 65536)
-        {
-            var n = await stream.ReadAsync(buffer, 0, buffer.Length);
-            if (n <= 0)
-                return (null, "", null);
-            data.AddRange(buffer.Take(n));
-            headerEnd = IndexOf(data, HeaderSeparator);
-        }
-
-        if (headerEnd < 0)
-            return (null, "", null);
-
-        var headerText = Encoding.UTF8.GetString(data.GetRange(0, headerEnd).ToArray());
-        var lines = headerText.Split("\r\n");
-        var parts = lines[0].Split(' ');
-        if (parts.Length < 2)
-            return (null, "", null);
-
-        var method = parts[0].ToUpperInvariant();
-        var path = parts[1].Split('?')[0].TrimEnd('/');
-
-        var contentLength = 0;
-        foreach (var line in lines.Skip(1))
-        {
-            var idx = line.IndexOf(':');
-            if (idx <= 0)
-                continue;
-            var name = line[..idx].Trim();
-            if (name.Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
-                int.TryParse(line[(idx + 1)..].Trim(), out contentLength);
-        }
-
-        var bodyStart = headerEnd + HeaderSeparator.Length;
-        var bodyBytes = data.GetRange(Math.Min(bodyStart, data.Count), Math.Max(0, data.Count - bodyStart)).ToList();
-        while (bodyBytes.Count < contentLength)
-        {
-            var n = await stream.ReadAsync(buffer, 0, Math.Min(buffer.Length, contentLength - bodyBytes.Count));
-            if (n <= 0)
-                break;
-            bodyBytes.AddRange(buffer.Take(n));
-        }
-
-        return (method, path, Encoding.UTF8.GetString(bodyBytes.ToArray()));
     }
 
     private static async Task WriteResponseAsync(NetworkStream stream, int status, string json)
@@ -163,22 +113,159 @@ public sealed class MiniHttpServer
         await stream.WriteAsync(payload, 0, payload.Length);
     }
 
-    private static int IndexOf(List<byte> data, byte[] pattern)
+    /// <summary>Потоковое чтение HTTP-запроса: заголовки + тело (Content-Length или chunked).</summary>
+    private sealed class RequestReader
     {
-        for (var i = 0; i + pattern.Length <= data.Count; i++)
+        private readonly NetworkStream _stream;
+        private readonly List<byte> _buffer = new();
+
+        public RequestReader(NetworkStream stream)
         {
-            var match = true;
-            for (var j = 0; j < pattern.Length; j++)
+            _stream = stream;
+        }
+
+        public async Task<(string? Method, string Path, string? Body)> ReadRequestAsync()
+        {
+            var headerText = await ReadBlockAsync();
+            if (headerText is null)
+                return (null, "", null);
+
+            var lines = headerText.Split("\r\n");
+            var parts = lines[0].Split(' ');
+            if (parts.Length < 2)
+                return (null, "", null);
+
+            var method = parts[0].ToUpperInvariant();
+            var path = parts[1].Split('?')[0].TrimEnd('/');
+
+            var contentLength = 0;
+            var chunked = false;
+            foreach (var line in lines.Skip(1))
             {
-                if (data[i + j] != pattern[j])
+                var idx = line.IndexOf(':');
+                if (idx <= 0)
+                    continue;
+                var name = line[..idx].Trim();
+                var value = line[(idx + 1)..].Trim();
+                if (name.Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
+                    int.TryParse(value, out contentLength);
+                else if (name.Equals("Transfer-Encoding", StringComparison.OrdinalIgnoreCase) &&
+                         value.Contains("chunked", StringComparison.OrdinalIgnoreCase))
+                    chunked = true;
+            }
+
+            if (chunked)
+                return (method, path, await ReadChunkedBodyAsync());
+            if (contentLength > 0)
+                return (method, path, Encoding.UTF8.GetString(await ReadBytesAsync(contentLength)));
+            return (method, path, null);
+        }
+
+        /// <summary>Читает до пустой строки (\r\n\r\n) — блок заголовков без завершающего разделителя.</summary>
+        private async Task<string?> ReadBlockAsync()
+        {
+            var data = new List<byte>();
+            while (data.Count < 65536)
+            {
+                var (line, ok) = await ReadLineBytesAsync();
+                if (!ok)
+                    return data.Count == 0 ? null : Encoding.UTF8.GetString(data.ToArray());
+                if (line.Count == 0)
+                    return Encoding.UTF8.GetString(data.ToArray());
+                data.AddRange(line);
+                data.Add(13);
+                data.Add(10);
+            }
+            return null;
+        }
+
+        private async Task<string> ReadChunkedBodyAsync()
+        {
+            var body = new List<byte>();
+            while (true)
+            {
+                var sizeLine = await ReadLineAsync();
+                if (sizeLine is null)
+                    break;
+                var semicolon = sizeLine.IndexOf(';');
+                var sizeText = (semicolon >= 0 ? sizeLine[..semicolon] : sizeLine).Trim();
+                if (!int.TryParse(sizeText, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var size))
+                    break;
+                if (size == 0)
                 {
-                    match = false;
+                    // trailers — до пустой строки
+                    while (true)
+                    {
+                        var trailer = await ReadLineAsync();
+                        if (trailer is null || trailer.Length == 0)
+                            break;
+                    }
                     break;
                 }
+
+                body.AddRange(await ReadBytesAsync(size));
+                await ReadBytesAsync(2); // CRLF после чанка
             }
-            if (match)
-                return i;
+            return Encoding.UTF8.GetString(body.ToArray());
         }
-        return -1;
+
+        private async Task<string?> ReadLineAsync()
+        {
+            var bytes = await ReadLineBytesAsync();
+            return bytes.Ok ? Encoding.UTF8.GetString(bytes.Line.ToArray()) : null;
+        }
+
+        private async Task<(List<byte> Line, bool Ok)> ReadLineBytesAsync()
+        {
+            var line = new List<byte>();
+            while (true)
+            {
+                if (_buffer.Count > 0)
+                {
+                    // ищем CRLF в буфере
+                    for (var i = 0; i + 1 < _buffer.Count; i++)
+                    {
+                        if (_buffer[i] == 13 && _buffer[i + 1] == 10)
+                        {
+                            line.AddRange(_buffer.GetRange(0, i));
+                            _buffer.RemoveRange(0, i + 2);
+                            return (line, true);
+                        }
+                    }
+                    // CRLF ещё не доехал — выносим всё, кроме возможного начала CRLF
+                    var keep = _buffer.Count > 0 && _buffer[^1] == 13 ? 1 : 0;
+                    line.AddRange(_buffer.GetRange(0, _buffer.Count - keep));
+                    _buffer.RemoveRange(0, _buffer.Count - keep);
+                }
+
+                var tmp = new byte[8192];
+                var n = await _stream.ReadAsync(tmp, 0, tmp.Length);
+                if (n <= 0)
+                    return (line, false);
+                _buffer.AddRange(tmp.Take(n));
+            }
+        }
+
+        private async Task<byte[]> ReadBytesAsync(int count)
+        {
+            var result = new List<byte>(count);
+            while (result.Count < count)
+            {
+                if (_buffer.Count > 0)
+                {
+                    var take = Math.Min(count - result.Count, _buffer.Count);
+                    result.AddRange(_buffer.GetRange(0, take));
+                    _buffer.RemoveRange(0, take);
+                    continue;
+                }
+
+                var tmp = new byte[Math.Min(8192, count - result.Count)];
+                var n = await _stream.ReadAsync(tmp, 0, tmp.Length);
+                if (n <= 0)
+                    break;
+                result.AddRange(tmp.Take(n));
+            }
+            return result.ToArray();
+        }
     }
 }

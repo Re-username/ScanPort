@@ -89,12 +89,14 @@ public sealed class ScanService
             _running = true;
         }
 
-        IPAddress? ip;
+        IPAddress[] ips;
         try
         {
             var addrs = await Dns.GetHostAddressesAsync(req.Host!, ct);
-            ip = addrs.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork)
-                 ?? addrs.FirstOrDefault();
+            // предпочитаем IPv4; их может быть несколько — устройство в нескольких сетях
+            ips = addrs.Where(a => a.AddressFamily == AddressFamily.InterNetwork).ToArray();
+            if (ips.Length == 0)
+                ips = addrs;
         }
         catch (Exception ex)
         {
@@ -102,7 +104,7 @@ public sealed class ScanService
             return;
         }
 
-        if (ip is null)
+        if (ips.Length == 0)
         {
             Finish("Не удалось разрешить имя хоста.");
             return;
@@ -117,7 +119,7 @@ public sealed class ScanService
         lock (_gate) { _total = checks.Count; }
 
         if (req.Ping)
-            _ = Task.Run(() => PingLoopAsync(ip, req.TimeoutMs, ct), ct);
+            _ = Task.Run(() => PingLoopAsync(ips, req.TimeoutMs, ct), ct);
 
         try
         {
@@ -128,8 +130,8 @@ public sealed class ScanService
                     try
                     {
                         PortResult? result = check.Proto == "tcp"
-                            ? await CheckTcpAsync(ip, check.Port, req.TimeoutMs, req.Banner, token)
-                            : await CheckUdpAsync(ip, check.Port, req.TimeoutMs, token);
+                            ? await CheckTcpAsync(ips, check.Port, req.TimeoutMs, req.Banner, token)
+                            : await CheckUdpAsync(ips, check.Port, req.TimeoutMs, token);
                         if (result is not null)
                             AddResult(result);
                     }
@@ -146,18 +148,42 @@ public sealed class ScanService
         Finish(error: null);
     }
 
-    private async Task PingLoopAsync(IPAddress ip, int timeoutMs, CancellationToken ct)
+    private async Task PingLoopAsync(IPAddress[] ips, int timeoutMs, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             string text;
             try
             {
-                using var ping = new Ping();
-                var reply = await ping.SendPingAsync(ip, Math.Min(timeoutMs, 2000));
-                text = reply.Status == IPStatus.Success
-                    ? $"Хост отвечает на ping, {reply.RoundtripTime} мс · {ip}"
-                    : $"Хост не отвечает на ping · {ip}";
+                // пингуем все адреса хоста параллельно — достаточно одного ответившего
+                var tasks = ips.Select(async ip =>
+                {
+                    try
+                    {
+                        using var ping = new Ping();
+                        var reply = await ping.SendPingAsync(ip, Math.Min(timeoutMs, 2000));
+                        return reply.Status == IPStatus.Success ? ip : null;
+                    }
+                    catch
+                    {
+                        return null;
+                    }
+                }).ToList();
+
+                IPAddress? alive = null;
+                foreach (var task in tasks)
+                {
+                    var ip = await task;
+                    if (ip is not null)
+                    {
+                        alive = ip;
+                        break;
+                    }
+                }
+
+                text = alive is not null
+                    ? $"Хост отвечает на ping · {alive}"
+                    : "Хост не отвечает на ping (ICMP может быть запрещён)";
             }
             catch (Exception ex)
             {
@@ -172,23 +198,62 @@ public sealed class ScanService
     }
 
     private static async Task<PortResult?> CheckTcpAsync(
-        IPAddress ip, int port, int timeoutMs, bool grabBanner, CancellationToken ct)
+        IPAddress[] ips, int port, int timeoutMs, bool grabBanner, CancellationToken ct)
     {
-        using var tcp = new TcpClient(ip.AddressFamily);
-        try
-        {
-            var timeout = TimeSpan.FromMilliseconds(timeoutMs);
-            await tcp.ConnectAsync(ip, port, ct).AsTask().WaitAsync(timeout, ct);
+        var timeout = TimeSpan.FromMilliseconds(timeoutMs);
+        // пробуем подключиться по каждому адресу хоста — кто первым ответил, тот и есть
+        var attempts = ips.Select(ip => TryConnectAsync(ip, port, timeout, ct)).ToList();
 
+        TcpClient? winner = null;
+        var rest = new List<Task<TcpClient?>>(attempts);
+        while (rest.Count > 0)
+        {
+            var done = await Task.WhenAny(rest);
+            rest.Remove(done);
+            var client = done.Result;
+            if (client is not null)
+            {
+                winner = client;
+                break;
+            }
+        }
+
+        // проигравшие попытки: если кто-то всё же подключится — закроем сокет
+        foreach (var task in rest)
+        {
+            _ = task.ContinueWith(t =>
+            {
+                try { t.Result?.Dispose(); }
+                catch { }
+            });
+        }
+
+        if (winner is null)
+            return null; // закрыт или отфильтрован на всех адресах
+
+        using (winner)
+        {
             string? banner = null;
             if (grabBanner)
-                banner = await ReadBannerAsync(tcp, port, timeoutMs, ct);
+                banner = await ReadBannerAsync(winner, port, timeoutMs, ct);
 
             return new PortResult(port, "tcp", "open", banner);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+    }
+
+    private static async Task<TcpClient?> TryConnectAsync(
+        IPAddress ip, int port, TimeSpan timeout, CancellationToken ct)
+    {
+        var tcp = new TcpClient(ip.AddressFamily);
+        try
         {
-            return null; // закрыт или отфильтрован — в результаты не попадает
+            await tcp.ConnectAsync(ip, port, ct).AsTask().WaitAsync(timeout, ct);
+            return tcp;
+        }
+        catch
+        {
+            tcp.Dispose();
+            return null;
         }
     }
 
@@ -243,25 +308,70 @@ public sealed class ScanService
     }
 
     private static async Task<PortResult> CheckUdpAsync(
-        IPAddress ip, int port, int timeoutMs, CancellationToken ct)
+        IPAddress[] ips, int port, int timeoutMs, CancellationToken ct)
+    {
+        var timeout = TimeSpan.FromMilliseconds(timeoutMs);
+        var attempts = ips.Select(ip => TryUdpAsync(ip, port, timeout, ct)).ToList();
+
+        (string Status, string? Banner)? winner = null;
+        var rest = new List<Task<(string Status, string? Banner)?>>(attempts);
+        while (rest.Count > 0)
+        {
+            var done = await Task.WhenAny(rest);
+            rest.Remove(done);
+            var result = done.Result;
+            if (result is not null)
+            {
+                winner = result;
+                break;
+            }
+        }
+
+        // ответа не было ни на одном адресе — результат неопределён
+        var (status, banner) = winner ?? ("unknown", null);
+        return new PortResult(port, "udp", status, banner);
+    }
+
+    private static async Task<(string Status, string? Banner)?> TryUdpAsync(
+        IPAddress ip, int port, TimeSpan timeout, CancellationToken ct)
     {
         using var udp = new UdpClient(ip.AddressFamily);
-        string? banner = null;
-        var status = "unknown"; // тишина — результат неопределён (может быть отфильтрован)
         try
         {
             udp.Connect(ip, port);
             await udp.SendAsync(UdpProbe, UdpProbe.Length);
-            var result = await udp.ReceiveAsync().WaitAsync(TimeSpan.FromMilliseconds(timeoutMs), ct);
-            status = "open";
-            banner = Sanitize(Encoding.UTF8.GetString(result.Buffer, 0, Math.Min(result.Buffer.Length, 256)));
+            var result = await udp.ReceiveAsync().WaitAsync(timeout, ct);
+            var banner = Sanitize(Encoding.UTF8.GetString(result.Buffer, 0, Math.Min(result.Buffer.Length, 256)));
+            return ("open", banner);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch
         {
-            // тишина — оставляем "unknown"
+            return null; // тишина на этом адресе
         }
+    }
 
-        return new PortResult(port, "udp", status, banner);
+    /// <summary>IPv4-адреса этого устройства из всех активных сетевых интерфейсов (кроме loopback и туннелей).</summary>
+    public static IReadOnlyList<string> GetLocalIPv4()
+    {
+        var result = new List<string>();
+        try
+        {
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up)
+                    continue;
+                if (ni.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel)
+                    continue;
+                foreach (var address in ni.GetIPProperties().UnicastAddresses)
+                {
+                    if (address.Address.AddressFamily == AddressFamily.InterNetwork &&
+                        !IPAddress.IsLoopback(address.Address))
+                        result.Add(address.Address.ToString());
+                }
+            }
+        }
+        catch { /* список адресов — подсказка, не критично */ }
+        return result.Distinct().ToList();
     }
 
     private static string? Sanitize(string? text)

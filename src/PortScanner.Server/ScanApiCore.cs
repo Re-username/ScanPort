@@ -46,4 +46,7 @@ public static class ScanApiCore
         scans.Cancel();
         return (200, "{}");
     }
+
+    public static (int Status, string Json) Addresses() =>
+        (200, JsonSerializer.Serialize(new { addresses = ScanService.GetLocalIPv4() }, JsonOptions));
 }
