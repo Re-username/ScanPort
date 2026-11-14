@@ -12,34 +12,33 @@
     <button type="button" class="btn" @onclick="OpenHelp" title="Открыть справку (F1)">F1 · Справка</button>
     <button type="button" class="btn" @onclick="ToggleIps" title="IP-адреса этого устройства">🖧 IP устройства</button>
     <button type="button" class="btn" @onclick="ToggleTheme" title="Переключить тему">@(IsDark ? "☀ Светлая" : "☾ Тёмная")</button>
-</div>
-
-@if (IpsVisible)
-{
-    <div class="ips-panel">
-        <div class="ips-heading">
-            <h4>IP этого устройства</h4>
-            <button type="button" class="btn btn-small" @onclick="() => IpsVisible = false" title="Закрыть">✕</button>
-        </div>
-        @if (LocalIps.Count > 0)
-        {
-            <ul>
-                @foreach (var ip in LocalIps)
-                {
-                    <li><button type="button" class="ip-item" @onclick="() => CopyIp(ip)" title="Скопировать">@ip @if (CopiedIp == ip)
+    @if (IpsVisible)
+    {
+        <div class="ips-panel">
+            <div class="ips-heading">
+                <h4>IP этого устройства</h4>
+                <button type="button" class="btn btn-small" @onclick="() => IpsVisible = false" title="Закрыть">✕</button>
+            </div>
+            @if (LocalIps.Count > 0)
+            {
+                <ul>
+                    @foreach (var ip in LocalIps)
                     {
-                        <span class="ip-copied">✓ скопировано</span>
-                    }</button></li>
-                }
-            </ul>
-            <p class="ips-note">Нажмите на адрес, чтобы скопировать. Несколько адресов — несколько сетей (Wi-Fi, Ethernet, VPN); удалённое устройство должно быть в одной из них.</p>
-        }
-        else
-        {
-            <p class="ips-note">Не удалось определить IP-адреса устройства.</p>
-        }
-    </div>
-}
+                        <li><button type="button" class="ip-item" @onclick="() => CopyIp(ip)" title="Скопировать">@ip @if (CopiedIp == ip)
+                        {
+                            <span class="ip-copied">✓ скопировано</span>
+                        }</button></li>
+                    }
+                </ul>
+                <p class="ips-note">Нажмите на адрес, чтобы скопировать. Несколько адресов — несколько сетей (Wi-Fi, Ethernet, VPN); удалённое устройство должно быть в одной из них.</p>
+            }
+            else
+            {
+                <p class="ips-note">Не удалось определить IP-адреса устройства.</p>
+            }
+        </div>
+    }
+</div>
 
 <div class="form-grid">
     <label>

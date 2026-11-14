@@ -471,11 +471,12 @@ input:focus-visible {
   .progress-bar.animated, .loading-screen .spinner { animation: none; }
 }
 
-/* Панель IP-адресов устройства (кнопка в шапке) */
+/* Панель IP-адресов устройства (кнопка в шапке). fixed: не влияет на прокрутку страницы,
+   правая грань совпадает с правым краем .layout (max-width 980, padding 16) */
 .ips-panel {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
+  position: fixed;
+  top: 60px;
+  right: max(16px, calc(50% - 474px));
   z-index: 60;
   min-width: 260px;
   max-width: 340px;
