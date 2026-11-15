@@ -13,7 +13,7 @@ public sealed class ScanService
 {
     public sealed record ScanRequest(
         string? Host, int StartPort, int EndPort, int TimeoutMs,
-        bool Tcp, bool Udp, bool Banner, bool Ping);
+        bool Tcp, bool Udp, bool Banner, bool Ping, bool Closed);
 
     public sealed record PortResult(int Port, string Protocol, string Status, string? Banner);
 
@@ -140,7 +140,7 @@ public sealed class ScanService
                             await Task.Delay(150, token);
 
                         PortResult? result = check.Proto == "tcp"
-                            ? await CheckTcpAsync(ips, check.Port, req.TimeoutMs, req.Banner, token)
+                            ? await CheckTcpAsync(ips, check.Port, req.TimeoutMs, req.Banner, req.Closed, token)
                             : await CheckUdpAsync(ips, check.Port, req.TimeoutMs, token);
                         if (result is not null)
                             AddResult(result);
@@ -210,7 +210,7 @@ public sealed class ScanService
     }
 
     private static async Task<PortResult?> CheckTcpAsync(
-        IPAddress[] ips, int port, int timeoutMs, bool grabBanner, CancellationToken ct)
+        IPAddress[] ips, int port, int timeoutMs, bool grabBanner, bool includeClosed, CancellationToken ct)
     {
         var timeout = TimeSpan.FromMilliseconds(timeoutMs);
         // пробуем подключиться по каждому адресу хоста — кто первым ответил, тот и есть
@@ -241,7 +241,10 @@ public sealed class ScanService
         }
 
         if (winner is null)
-            return null; // закрыт или отфильтрован на всех адресах
+        {
+            // закрыт или отфильтрован на всех адресах
+            return includeClosed ? new PortResult(port, "tcp", "closed", null) : null;
+        }
 
         using (winner)
         {

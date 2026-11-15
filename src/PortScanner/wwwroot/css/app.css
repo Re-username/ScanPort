@@ -548,3 +548,6 @@ input:focus-visible {
 /* Галочка «только открытые» и кнопка «Копировать» в заголовке результатов */
 .open-only { display: flex; align-items: center; gap: 5px; font-size: .8rem; color: var(--text-soft); white-space: nowrap; }
 .results-heading { gap: 10px; }
+
+/* Закрытые порты (режим «показывать все») — приглушённый статус */
+.st-closed { color: var(--text-soft); }
