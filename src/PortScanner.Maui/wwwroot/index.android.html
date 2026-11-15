@@ -79,23 +79,29 @@
             <div id="boot-error" style="display:none;max-width:85%;color:#e5534b;font-size:13px;text-align:left;white-space:pre-wrap;"></div>
         </div>
     </div>
-    <!-- autostart="false": на Android нативный мост window.external.receiveMessage готовится
-         дольше, чем грузится страница; автостарт в этой гонке падает и экран висит на спиннере.
-         Стартуем вручную, как только мост появился. -->
+    <!-- autostart="false": стартуем Blazor сами. Автостарт на Android иногда срабатывает
+         до готовности нативного моста и падает; наш стартер повторяет попытки
+         и считает «уже стартовано» успехом. -->
     <script src="_framework/blazor.webview.js" autostart="false"></script>
     <script>
-        (function tryStart() {
-            if (window.__blazorStartTried) return;
-            if (window.external && typeof window.external.receiveMessage === 'function') {
-                window.__blazorStartTried = true;
-                // автостарт мог уже запустить Blazor — двойной старт не страшен, глушим шум
+        (function () {
+            var tries = 0;
+            function done() { window.__blazorStarted = true; }
+            function attempt() {
+                if (window.__blazorStarted) return;
+                tries++;
+                var failed = function (err) {
+                    // автостарт (если вдруг сработал) уже запустил Blazor — это успех
+                    if (err && /already started/i.test(String(err && err.message || err))) { done(); return; }
+                    if (tries < 60) setTimeout(attempt, 200);
+                };
                 try {
                     var r = Blazor.start();
-                    if (r && typeof r.catch === 'function') r.catch(function () { });
-                } catch (e) { }
-            } else {
-                setTimeout(tryStart, 50);
+                    if (r && typeof r.then === 'function') r.then(done, failed);
+                    else done();
+                } catch (e) { failed(e); }
             }
+            attempt();
         })();
     </script>
 </body>
