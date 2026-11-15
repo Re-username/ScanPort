@@ -2,7 +2,7 @@
 #   powershell -ExecutionPolicy Bypass -File tools/build-android.ps1
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$ver = '1.5.2'
+$ver = '1.5.3'
 
 # Тулчейн (пути как в проекте filechat)
 $env:JAVA_HOME = 'D:\android-tools\jdk-17'
