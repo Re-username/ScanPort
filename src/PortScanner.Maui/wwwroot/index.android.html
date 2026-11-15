@@ -80,28 +80,37 @@
         </div>
     </div>
     <!-- autostart="false": стартуем Blazor сами. Автостарт на Android иногда срабатывает
-         до готовности нативного моста и падает; наш стартер повторяет попытки
-         и считает «уже стартовано» успехом. -->
+         до готовности нативного моста и падает; холодный старт .NET занимает >10 с.
+         Мост window.external.receiveMessage появляется, когда сторона .NET готова —
+         до этого Blazor.start() виснет. Если старт всё равно не завершился,
+         через 25 с страница перезагружается (сторона .NET к тому моменту уже готова). -->
     <script src="_framework/blazor.webview.js" autostart="false"></script>
     <script>
         (function () {
             var tries = 0;
-            function done() { window.__blazorStarted = true; }
-            function attempt() {
-                if (window.__blazorStarted) return;
-                tries++;
-                var failed = function (err) {
-                    // автостарт (если вдруг сработал) уже запустил Blazor — это успех
-                    if (err && /already started/i.test(String(err && err.message || err))) { done(); return; }
-                    if (tries < 60) setTimeout(attempt, 200);
-                };
-                try {
-                    var r = Blazor.start();
-                    if (r && typeof r.then === 'function') r.then(done, failed);
-                    else done();
-                } catch (e) { failed(e); }
+            try { tries = +(sessionStorage.getItem('__spBootTries') || 0); } catch (e) { }
+            function tryStart() {
+                if (window.external && typeof window.external.receiveMessage === 'function') {
+                    try {
+                        var r = Blazor.start();
+                        if (r && typeof r.then === 'function')
+                            r.then(function () {
+                                try { sessionStorage.removeItem('__spBootTries'); } catch (e) { }
+                            }, function () { setTimeout(tryStart, 1000); });
+                    } catch (e) { setTimeout(tryStart, 1000); }
+                } else {
+                    setTimeout(tryStart, 100);
+                }
             }
-            attempt();
+            tryStart();
+            setTimeout(function () {
+                var app = document.getElementById('app');
+                var loading = app && app.querySelector('.loading-screen');
+                if (loading && tries < 3) {
+                    try { sessionStorage.setItem('__spBootTries', String(tries + 1)); } catch (e) { }
+                    location.reload();
+                }
+            }, 25000);
         })();
     </script>
 </body>
