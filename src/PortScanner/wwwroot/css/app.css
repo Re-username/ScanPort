@@ -387,7 +387,8 @@ input:focus-visible {
   background: var(--panel);
 }
 
-.results-table table { border: 0; }
+/* border-collapse: separate — иначе position: sticky у th не работает в Chromium */
+.results-table table { border: 0; border-collapse: separate; border-spacing: 0; }
 .results-table thead th { position: sticky; top: 0; z-index: 2; padding: 0; }
 .th-sort {
   width: 100%;
