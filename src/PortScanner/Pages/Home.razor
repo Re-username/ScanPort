@@ -230,7 +230,7 @@
                 <section>
                     <h3>Что такое баннер</h3>
                     <p><strong>Баннер — это текстовый ответ программы, которая работает на открытом порту.</strong> Например: <code>SSH-2.0-OpenSSH_9.6</code>, <code>220 FTP ready</code> или <code>HTTP/1.1 200 OK · Server: nginx</code>.</p>
-                    <p>Сканер сначала ждёт приветствие службы. Для типичных веб-портов дополнительно отправляет HTTP-запрос <code>HEAD /</code>. Для UDP баннер — это первый ответ службы на пробную датаграмму. Пустой баннер — это нормально: многие службы не сообщают название или используют шифрование. <strong>Отсутствие баннера не означает, что порт закрыт.</strong></p>
+                    <p>Сканер сначала ждёт приветствие службы. Для типичных веб-портов дополнительно отправляет HTTP-запрос <code>HEAD /</code>. Для UDP баннер — это первый ответ службы на пробную датаграмму. Для промышленных устройств сканер спрашивает идентификацию напрямую: <strong>EtherNet/IP ListIdentity</strong> (порт 44818 — устройство само называет вендора и модель, так Shodan узнаёт «Omron NX1P2»), <strong>Modbus Read Device Identification</strong> (порт 502) и <strong>SNMP sysDescr</strong> (порт 161). Для TLS-служб показывается <strong>сертификат</strong> (имя в CN). Пустой баннер — это нормально: многие службы не сообщают название или используют шифрование. <strong>Отсутствие баннера не означает, что порт закрыт.</strong></p>
                 </section>
                 <section>
                     <h3>Таймаут и профили сети</h3>
@@ -369,13 +369,20 @@
         [135] = "RPC (Windows)", [137] = "NetBIOS name", [138] = "NetBIOS datagram",
         [139] = "NetBIOS session", [143] = "IMAP", [161] = "SNMP", [162] = "SNMP trap",
         [443] = "HTTPS", [445] = "SMB", [500] = "IKE (IPsec)", [502] = "Modbus TCP",
-        [514] = "Syslog", [520] = "RIP", [993] = "IMAPS", [995] = "POP3S", [1194] = "OpenVPN",
+        [514] = "Syslog", [520] = "RIP", [554] = "RTSP (видеокамера)", [993] = "IMAPS", [995] = "POP3S", [1194] = "OpenVPN",
         [1433] = "MS SQL Server", [1434] = "MS SQL Browser (UDP)", [1521] = "Oracle DB",
-        [1701] = "L2TP", [1723] = "PPTP", [1812] = "RADIUS", [1900] = "UPnP (SSDP)",
-        [3306] = "MySQL", [3389] = "RDP", [4500] = "IPsec NAT-T", [5353] = "mDNS",
+        [1701] = "L2TP", [1723] = "PPTP", [1812] = "RADIUS", [1880] = "Node-RED", [1883] = "MQTT", [1900] = "UPnP (SSDP)",
+        [1911] = "Tridium Niagara (Fox)", [1962] = "PCWorx (Phoenix Contact)", [2000] = "SCCP (Cisco VoIP)",
+        [20547] = "ProConOS", [2222] = "EtherNet/IP I/O", [2404] = "IEC 60870-5-104", [3000] = "HTTP (Grafana/dev)",
+        [3306] = "MySQL", [3389] = "RDP", [3671] = "KNXnet/IP", [4500] = "IPsec NAT-T", [4840] = "OPC UA",
+        [5001] = "Mitsubishi MC", [5060] = "SIP (VoIP)", [5061] = "SIP-TLS", [5353] = "mDNS",
         [5432] = "PostgreSQL", [5900] = "VNC", [5985] = "WinRM (HTTP)", [6379] = "Redis",
-        [8080] = "HTTP (alt)", [9600] = "Omron FINS", [11740] = "CODESYS V3 TCP",
-        [27017] = "MongoDB", [44818] = "EtherNet/IP", [53478] = "CODESYS V3 (UDP)"
+        [8000] = "HTTP (alt)",
+        [8080] = "HTTP (alt)", [8123] = "Home Assistant", [8883] = "MQTT-TLS",
+        [9600] = "Omron FINS", [11740] = "CODESYS V3 TCP",
+        [20000] = "DNP3", [2375] = "Docker API", [2376] = "Docker API (TLS)", [27017] = "MongoDB",
+        [34962] = "PROFINET", [44818] = "EtherNet/IP", [47808] = "BACnet/IP", [51820] = "WireGuard",
+        [53478] = "CODESYS V3 (UDP)", [6443] = "Kubernetes API"
     };
 
     private sealed record ScanStartResponse(string? Error);

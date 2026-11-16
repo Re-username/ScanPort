@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace PortScanner.Server;
@@ -23,6 +25,31 @@ public sealed class ScanService
         bool Running, string? Error, string? Ping, bool Paused, int Timeout);
 
     private static readonly byte[] UdpProbe = { 0x00 };
+
+    // SNMP v2c Get sysDescr (community public) — сетевое оборудование отвечает
+    // строкой вида "Omron ... Switch", это самый информативный опрос для железа.
+    private static readonly byte[] SnmpSysDescrProbe =
+    {
+        0x30, 0x29, 0x02, 0x01, 0x01, 0x04, 0x06, 0x70, 0x75, 0x62, 0x6C, 0x69, 0x63,
+        0xA0, 0x1C, 0x02, 0x04, 0x00, 0x00, 0x00, 0x01, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00,
+        0x30, 0x0E, 0x30, 0x0C, 0x06, 0x08, 0x2B, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x05, 0x00
+    };
+
+    // EtherNet/IP ListIdentity (encapsulation command 0x0063): устройство отвечает
+    // Vendor ID, Product Code и именем продукта — так Shodan узнаёт «Omron NX1P2».
+    private static readonly byte[] CipListIdentityProbe = CreateCipProbe();
+
+    private static byte[] CreateCipProbe()
+    {
+        var probe = new byte[24]; // command 0x0063 = bytes 0x63, 0x00
+        probe[0] = 0x63;
+        return probe;
+    }
+
+    // Порты, где сначала пробуем TLS, а потом уже HTTP: отправка открытого текста
+    // TLS-серверу часто приводит к разрыву соединения.
+    private static readonly HashSet<int> TlsPorts = new()
+        { 443, 465, 563, 636, 853, 989, 990, 5061, 5223, 8443, 8883, 8884 };
 
     private const int MaxParallelism = 128;
 
@@ -166,7 +193,7 @@ public sealed class ScanService
                         var effectiveTimeout = req.Profile == "auto" ? _adaptiveTimeout : req.TimeoutMs;
 
                         PortResult? result = check.Proto == "tcp"
-                            ? await CheckTcpAsync(ips, check.Port, effectiveTimeout, req.Banner, includeClosed: true, ProfileRetries(req.Profile), token)
+                            ? await CheckTcpAsync(ips, check.Port, effectiveTimeout, req.Banner, includeClosed: true, ProfileRetries(req.Profile), req.Host ?? string.Empty, token)
                             : await CheckUdpAsync(ips, check.Port, effectiveTimeout, token);
                         if (result is not null)
                             AddResult(result);
@@ -254,7 +281,7 @@ public sealed class ScanService
     }
 
     private static async Task<PortResult?> CheckTcpAsync(
-        IPAddress[] ips, int port, int timeoutMs, bool grabBanner, bool includeClosed, int retries, CancellationToken ct)
+        IPAddress[] ips, int port, int timeoutMs, bool grabBanner, bool includeClosed, int retries, string hostName, CancellationToken ct)
     {
         var timeout = TimeSpan.FromMilliseconds(timeoutMs);
         // пробуем подключиться по каждому адресу хоста — кто первым ответил, тот и есть
@@ -294,7 +321,7 @@ public sealed class ScanService
         {
             string? banner = null;
             if (grabBanner)
-                banner = await ReadBannerAsync(winner, port, timeoutMs, ct);
+                banner = await ReadBannerAsync(winner, port, timeoutMs, hostName, ct);
 
             return new PortResult(port, "tcp", "open", banner);
         }
@@ -327,23 +354,48 @@ public sealed class ScanService
     }
 
     private static async Task<string?> ReadBannerAsync(
-        TcpClient tcp, int port, int timeoutMs, CancellationToken ct)
+        TcpClient tcp, int port, int timeoutMs, string hostName, CancellationToken ct)
     {
         try
         {
             var stream = tcp.GetStream();
-            var buffer = new byte[512];
-            var text = await TryReadAsync(stream, buffer, timeoutMs, ct);
+            var buffer = new byte[1024];
 
-            // HTTP-serveр не шлёт приветствие сам — спрашиваем. Раньше запрос уходил
-            // только на порты из WebPorts; теперь на любой открытый порт: так находятся
-            // веб-морды на нестандартных портах (перенесённые службы, пробросы).
+            // На классических TLS-портах начинаем сразу с TLS: пассивное чтение тут
+            // только ждёт таймаут впустую, а некоторые серверы рвут простаивающее
+            // соединение раньше, чем успеет начаться хендшейк.
+            var text = TlsPorts.Contains(port)
+                ? await TryTlsBannerAsync(tcp, buffer, timeoutMs, hostName, ct)
+                : await TryReadAsync(stream, buffer, timeoutMs, ct);
+
+            // Активные промышленные пробы: служба отвечает на запрос своей идентификацией —
+            // так определяется реальное устройство, а не догадка по номеру порта.
+            if (string.IsNullOrEmpty(text) && !TlsPorts.Contains(port) && port == 502)
+            {
+                // Modbus Read Device Identification (func 0x2B/0x0E)
+                var req = new byte[] { 0x00, 0x01, 0x00, 0x00, 0x00, 0x05, 0xFF, 0x2B, 0x0E, 0x01, 0x00 };
+                text = await ProbeAsync(stream, buffer, req, timeoutMs, ct, ParseModbusIdentification);
+            }
+
+            if (string.IsNullOrEmpty(text) && !TlsPorts.Contains(port) && port == 44818)
+            {
+                // EtherNet/IP ListIdentity — устройство само называет вендора и продукт
+                text = await ProbeAsync(stream, buffer, CipListIdentityProbe, timeoutMs, ct, ParseCipIdentity);
+            }
+
+            // HTTP-serveр не шлёт приветствие сам — спрашиваем на любом открытом порту:
+            // так находятся веб-морды на нестандартных портах (перенесённые службы, пробросы).
             if (string.IsNullOrEmpty(text))
             {
                 var request = Encoding.ASCII.GetBytes("HEAD / HTTP/1.0\r\n\r\n");
                 await stream.WriteAsync(request, 0, request.Length, ct).WaitAsync(TimeSpan.FromMilliseconds(timeoutMs), ct);
                 text = ExtractHttpBanner(await TryReadAsync(stream, buffer, timeoutMs, ct) ?? "");
             }
+
+            // TLS: шифрованные службы не дают читаемого баннера, но показывают сертификат.
+            // Вторая попытка — для TLS на нестандартном порту (после неудачного HTTP).
+            if (string.IsNullOrEmpty(text) && !TlsPorts.Contains(port))
+                text = await TryTlsBannerAsync(tcp, buffer, timeoutMs, hostName, ct);
 
             return Sanitize(text);
         }
@@ -353,18 +405,147 @@ public sealed class ScanService
         }
     }
 
-    private static async Task<string?> TryReadAsync(
-        NetworkStream stream, byte[] buffer, int timeoutMs, CancellationToken ct)
+    private static async Task<string?> ProbeAsync(
+        Stream stream, byte[] buffer, byte[] request, int timeoutMs, CancellationToken ct,
+        Func<byte[], int, string?> parser)
     {
         try
         {
+            await stream.WriteAsync(request, 0, request.Length, ct).WaitAsync(TimeSpan.FromMilliseconds(timeoutMs), ct);
             var n = await stream.ReadAsync(buffer, 0, buffer.Length, ct)
                 .WaitAsync(TimeSpan.FromMilliseconds(timeoutMs), ct);
-            return n > 0 ? Encoding.UTF8.GetString(buffer, 0, n) : null;
+            return n > 0 ? parser(buffer, n) : null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return null;
+        }
+    }
+
+    private static async Task<string?> TryTlsBannerAsync(TcpClient tcp, byte[] buffer, int timeoutMs, string hostName, CancellationToken ct)
+    {
+        try
+        {
+            // SNI: CDN и виртуальные хосты требуют имя хоста в хендшейке
+            var sni = Uri.CheckHostName(hostName) == UriHostNameType.Dns ? hostName : string.Empty;
+
+            using var ssl = new SslStream(tcp.GetStream(), leaveInnerStreamOpen: true, (_, _, _, _) => true);
+            await ssl.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+            {
+                TargetHost = sni,
+            }, ct).WaitAsync(TimeSpan.FromMilliseconds(Math.Min(timeoutMs, 6000)), ct);
+
+            var parts = new List<string>();
+
+            if (ssl.RemoteCertificate is { } remote)
+            {
+                try
+                {
+                    var cert = new X509Certificate2(remote);
+                    var cn = cert.GetNameInfo(X509NameType.SimpleName, false);
+                    parts.Add($"TLS: {cn}");
+                }
+                catch
+                {
+                    parts.Add($"TLS: {remote.Subject}");
+                }
+            }
+
+            // HTTPS поверх TLS — заодно серверный заголовок
+            var head = Encoding.ASCII.GetBytes("HEAD / HTTP/1.0\r\n\r\n");
+            var http = ExtractHttpBanner(await ProbeAsync(ssl, buffer, head, timeoutMs, ct, (b, n) => Encoding.ASCII.GetString(b, 0, n)) ?? "");
+            if (!string.IsNullOrEmpty(http))
+                parts.Insert(0, http);
+
+            return parts.Count > 0 ? string.Join(" · ", parts) : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>EtherNet/IP ListIdentity → «Vendor · Product» (так Shodan видит Omron NX1P2).</summary>
+    private static string? ParseCipIdentity(byte[] d, int n)
+    {
+        // заголовок инкапсуляции 24 б; далее: itemCount(2), itemType(2), itemLen(2),
+        // protoVer(2), sockaddr(16), vendorId(2), deviceType(2), productCode(2),
+        // revision(2), status(2), serial(4), nameLen(1), name
+        if (n < 64 || d[0] != 0x63)
+            return null;
+        var vendor = BitConverter.ToUInt16(d, 48);
+        var nameLen = d[62];
+        if (63 + nameLen > n)
+            return null;
+        var name = Encoding.ASCII.GetString(d, 63, nameLen);
+        if (name.Length == 0)
+            return null;
+        var vendorName = vendor switch
+        {
+            1 => "Allen-Bradley/Rockwell",
+            47 => "Omron",
+            _ => $"VendorId {vendor}",
+        };
+        return $"{vendorName} · {name}";
+    }
+
+    /// <summary>Modbus Read Device Identification → «Vendor Product Rev».</summary>
+    private static string? ParseModbusIdentification(byte[] d, int n)
+    {
+        if (n < 14 || d[7] != 0x2B)
+            return null;
+        var parts = new List<string>();
+        var i = 13; // unit(1)+func(1)+mei(1)+rdic(1)+conformity(1)+more(1)+nextObj(1)+numObj(1) = с 8 по 14
+        var count = Math.Min((int)d[12], 8);
+        for (var k = 0; k < count && i + 2 <= n; k++)
+        {
+            var id = d[i];
+            var len = d[i + 1];
+            i += 2;
+            if (i + len > n)
+                break;
+            var value = Encoding.ASCII.GetString(d, i, len);
+            i += len;
+            if (id <= 2 && value.Length > 0)
+                parts.Add(value); // 0 = VendorName, 1 = ProductCode, 2 = Revision
+        }
+        return parts.Count > 0 ? string.Join(" ", parts) : null;
+    }
+
+    /// <summary>SNMP-ответ → sysDescr: первая содержательная строка из OCTET STRING.</summary>
+    private static string? ParseSnmpSysDescr(byte[] d, int n)
+    {
+        for (var i = 0; i + 6 < n; i++)
+        {
+            if (d[i] != 0x04)
+                continue;
+            var len = d[i + 1];
+            if (len < 6 || i + 2 + len > n || len > 200)
+                continue;
+            var candidate = Encoding.UTF8.GetString(d, i + 2, len);
+            var printable = candidate.Count(c => !char.IsControl(c));
+            if (printable >= len * 0.9)
+                return candidate.Trim();
+        }
+        return null;
+    }
+
+    private static async Task<string?> TryReadAsync(
+        Stream stream, byte[] buffer, int timeoutMs, CancellationToken ct)
+    {
+        // Важно: чтение отменяется по таймауту через токен, а не через WaitAsync —
+        // брошенный «висючий» ReadAsync остаётся на сокете и ворует байты ответа
+        // следующих запросов (ломал TLS-хендшейк и HTTP-пробы).
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(timeoutMs);
+            var n = await stream.ReadAsync(buffer, 0, buffer.Length, timeoutCts.Token);
+            return n > 0 ? Encoding.UTF8.GetString(buffer, 0, n) : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return null; // таймаут чтения или отмена сканирования — баннера нет
         }
     }
 
@@ -410,12 +591,27 @@ public sealed class ScanService
         using var udp = new UdpClient(ip.AddressFamily);
         try
         {
+            // Промышленные порты опрашиваются осмысленным запросом: устройство отвечает
+            // своей идентификацией (SNMP sysDescr, EtherNet/IP ListIdentity), а не тишиной.
+            var probe = port switch
+            {
+                161 => SnmpSysDescrProbe,
+                44818 => CipListIdentityProbe,
+                _ => UdpProbe,
+            };
+
             udp.Connect(ip, port);
-            await udp.SendAsync(UdpProbe, UdpProbe.Length);
+            await udp.SendAsync(probe, probe.Length);
             var result = await udp.ReceiveAsync().WaitAsync(timeout, ct);
-            var raw = Encoding.UTF8.GetString(result.Buffer, 0, Math.Min(result.Buffer.Length, 256));
-            var printable = new string(raw.Where(c => !char.IsControl(c)).ToArray());
-            return ("open", Sanitize(printable));
+
+            string? banner = null;
+            if (port == 161)
+                banner = ParseSnmpSysDescr(result.Buffer, result.Buffer.Length);
+            else if (port == 44818)
+                banner = ParseCipIdentity(result.Buffer, result.Buffer.Length);
+
+            banner ??= Sanitize(Encoding.UTF8.GetString(result.Buffer, 0, Math.Min(result.Buffer.Length, 256)));
+            return ("open", banner);
         }
         catch
         {
