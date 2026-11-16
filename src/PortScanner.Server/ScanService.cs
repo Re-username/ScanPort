@@ -256,9 +256,9 @@ public sealed class ScanService
                 {
                     _lastRtt = (int)rtt;
                     // AUTO: регулируем таймаут проверок портов по замеру канала.
-                    // ×3 — запас на джиттер; жёсткий коридор 500–10000 мс.
+                    // ×8 — запас на джиттер: пинг 100 мс → таймаут 800 мс; жёсткий коридор 500–10000 мс.
                     if (profile == "auto")
-                        _adaptiveTimeout = (int)Math.Clamp(rtt * 3, 500, 10000);
+                        _adaptiveTimeout = (int)Math.Clamp(rtt * 8, 500, 10000);
                     text = profile == "auto"
                         ? $"Хост отвечает на ping, {rtt} мс · таймаут {_adaptiveTimeout} мс · {alive}"
                         : $"Хост отвечает на ping, {rtt} мс · {alive}";
