@@ -144,7 +144,6 @@
             </tbody>
         </table>
     </div>
-    }
 }
 @if (ScanCompleted && Results.Count == 0 && string.IsNullOrEmpty(ErrorMessage))
 {
@@ -703,7 +702,7 @@
                     ScanCompleted = true;
                     AddLog(_cancelRequested
                         ? "Сканирование отменено."
-                        : $"Сканирование завершено. Найдено: {Results.Count}.");
+                        : $"Сканирование завершено. Найдено: {Results.Count(r => r.Status != "closed")}.");
                 }
             }
             catch
