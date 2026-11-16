@@ -51,7 +51,7 @@
     </label>
     <label>
         Таймаут, мс
-        <input type="number" @bind="TimeoutMs" @bind:after="SaveSettings" min="100" max="30000" disabled="@IsScanning" />
+        <input type="number" @bind="TimeoutMs" @bind:after="SaveSettings" min="100" max="30000" disabled="@(IsScanning || NetMode == "auto")" title="@(NetMode == "auto" ? "В режиме AUTO таймаут регулируется автоматически по пингу (показано текущее значение)" : "Время ожидания ответа при проверке каждого порта")" />
     </label>
     <div>
         @if (!IsScanning)
@@ -379,7 +379,7 @@
     };
 
     private sealed record ScanStartResponse(string? Error);
-    private sealed record ScanStatus(int Scanned, int Total, PortResult[]? Results, bool Running, string? Error, string? Ping, bool Paused);
+    private sealed record ScanStatus(int Scanned, int Total, PortResult[]? Results, bool Running, string? Error, string? Ping, bool Paused, int Timeout);
     private sealed record PortResult(int Port, string Protocol, string Status, string? Banner);
     private sealed record LocalAddressesResponse(List<string>? Addresses);
 
@@ -754,6 +754,9 @@
                 TotalPorts = status.Total;
                 Results = status.Results?.ToList() ?? new List<PortResult>();
                 PingInfo = status.Ping;
+                // AUTO: показываем в поле таймаута живое значение от регулятора
+                if (NetMode == "auto" && status.Timeout > 0)
+                    TimeoutMs = status.Timeout;
                 if (status.Paused != IsPaused)
                 {
                     IsPaused = status.Paused;

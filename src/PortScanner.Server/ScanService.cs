@@ -20,7 +20,7 @@ public sealed class ScanService
 
     public sealed record ScanStatus(
         int Scanned, int Total, IReadOnlyList<PortResult> Results,
-        bool Running, string? Error, string? Ping, bool Paused);
+        bool Running, string? Error, string? Ping, bool Paused, int Timeout);
 
     private static readonly HashSet<int> WebPorts = new()
         { 80, 81, 82, 83, 88, 3000, 3128, 5000, 5080, 8000, 8008, 8080, 8081, 8888, 9000, 10000 };
@@ -99,7 +99,7 @@ public sealed class ScanService
             IEnumerable<PortResult> snapshot = _results;
             if (!includeClosed)
                 snapshot = snapshot.Where(r => r.Status != "closed");
-            return new ScanStatus(_scanned, _total, snapshot.ToArray(), _running, _error, _ping, _paused);
+            return new ScanStatus(_scanned, _total, snapshot.ToArray(), _running, _error, _ping, _paused, _adaptiveTimeout);
         }
     }
 
@@ -235,18 +235,14 @@ public sealed class ScanService
                     // ×3 — запас на джиттер; жёсткий коридор 500–10000 мс.
                     if (profile == "auto")
                         _adaptiveTimeout = (int)Math.Clamp(rtt * 3, 500, 10000);
-                    text = $"{rtt} мс";
+                    text = profile == "auto"
+                        ? $"Хост отвечает на ping, {rtt} мс · таймаут {_adaptiveTimeout} мс · {alive}"
+                        : $"Хост отвечает на ping, {rtt} мс · {alive}";
                 }
                 else
                 {
-                    text = profile == "auto"
-                        ? $"{_adaptiveTimeout} мс (по умолчанию, хост не пингуется)"
-                        : null;
+                    text = "Хост не отвечает на ping (ICMP может быть запрещён)";
                 }
-
-                text = alive is not null
-                    ? $"Хост отвечает на ping, {text} · {alive}"
-                    : "Хост не отвечает на ping (ICMP может быть запрещён)";
             }
             catch (Exception ex)
             {
