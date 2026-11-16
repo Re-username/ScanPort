@@ -13,7 +13,8 @@ public sealed class ScanService
 {
     public sealed record ScanRequest(
         string? Host, int[]? Ports, int TimeoutMs,
-        bool Tcp, bool Udp, bool Banner, bool Ping);
+        bool Tcp, bool Udp, bool Banner, bool Ping,
+        string Profile = "lan"); // lan | wan | auto
 
     public sealed record PortResult(int Port, string Protocol, string Status, string? Banner);
 
@@ -28,10 +29,28 @@ public sealed class ScanService
 
     private const int MaxParallelism = 128;
 
+    // Профили сети: LAN — скорость, WAN — достоверность на дальних каналах,
+    // AUTO — автоматическое регулирование таймаута по замеренному пингу.
+    private static int ProfileParallelism(string profile) => profile switch
+    {
+        "wan" => 48,
+        "auto" => 96,
+        _ => MaxParallelism,
+    };
+
+    private static int ProfileRetries(string profile) => profile switch
+    {
+        "wan" => 3,
+        "auto" => 2,
+        _ => 1,
+    };
+
     private readonly object _gate = new();
     private readonly List<PortResult> _results = new();
     private readonly HashSet<string> _keys = new(StringComparer.OrdinalIgnoreCase);
     private CancellationTokenSource? _cts;
+    private volatile int _adaptiveTimeout; // AUTO: регулируется по пингу, читается при старте каждой проверки
+    private volatile int _lastRtt = 500;   // последний замер пинга, мс (стартовое предположение)
     private int _scanned;
     private int _total;
     private bool _running;
@@ -101,6 +120,7 @@ public sealed class ScanService
             _ping = null;
             _running = true;
         }
+        _adaptiveTimeout = req.TimeoutMs;
         IPAddress[] ips;
         try
         {
@@ -131,12 +151,12 @@ public sealed class ScanService
         lock (_gate) { _total = checks.Count; }
 
         if (req.Ping)
-            _ = Task.Run(() => PingLoopAsync(ips, req.TimeoutMs, ct), ct);
+            _ = Task.Run(() => PingLoopAsync(ips, req.TimeoutMs, req.Profile, ct), ct);
 
         try
         {
             await Parallel.ForEachAsync(checks,
-                new ParallelOptions { MaxDegreeOfParallelism = MaxParallelism, CancellationToken = ct },
+                new ParallelOptions { MaxDegreeOfParallelism = ProfileParallelism(req.Profile), CancellationToken = ct },
                 async (check, token) =>
                 {
                     try
@@ -145,9 +165,12 @@ public sealed class ScanService
                         while (_paused && !token.IsCancellationRequested)
                             await Task.Delay(150, token);
 
+                        // AUTO: таймаут, откалиброванный последним пингом; профили LAN/WAN — заданный
+                        var effectiveTimeout = req.Profile == "auto" ? _adaptiveTimeout : req.TimeoutMs;
+
                         PortResult? result = check.Proto == "tcp"
-                            ? await CheckTcpAsync(ips, check.Port, req.TimeoutMs, req.Banner, includeClosed: true, token)
-                            : await CheckUdpAsync(ips, check.Port, req.TimeoutMs, token);
+                            ? await CheckTcpAsync(ips, check.Port, effectiveTimeout, req.Banner, includeClosed: true, ProfileRetries(req.Profile), token)
+                            : await CheckUdpAsync(ips, check.Port, effectiveTimeout, token);
                         if (result is not null)
                             AddResult(result);
                     }
@@ -164,20 +187,26 @@ public sealed class ScanService
         Finish(error: null);
     }
 
-    private async Task PingLoopAsync(IPAddress[] ips, int timeoutMs, CancellationToken ct)
+    private async Task PingLoopAsync(IPAddress[] ips, int baseTimeoutMs, string profile, CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             string text;
             try
             {
+                // срок ожидания пинга адаптируется к сети: AUTO — от последнего RTT
+                // (в коридоре 200–2000 мс), профили — от базового таймаута
+                var pingWait = profile == "auto"
+                    ? (int)Math.Clamp(_lastRtt * 2 + 100, 200, 2000)
+                    : Math.Min(baseTimeoutMs, 2000);
+
                 // пингуем все адреса хоста параллельно — достаточно одного ответившего
                 var tasks = ips.Select(async ip =>
                 {
                     try
                     {
                         using var ping = new Ping();
-                        var reply = await ping.SendPingAsync(ip, Math.Min(timeoutMs, 2000));
+                        var reply = await ping.SendPingAsync(ip, pingWait);
                         return reply.Status == IPStatus.Success ? (ip, reply.RoundtripTime) : ((IPAddress?)null, 0L);
                     }
                     catch
@@ -199,8 +228,24 @@ public sealed class ScanService
                     }
                 }
 
+                if (alive is not null)
+                {
+                    _lastRtt = (int)rtt;
+                    // AUTO: регулируем таймаут проверок портов по замеру канала.
+                    // ×3 — запас на джиттер; жёсткий коридор 500–10000 мс.
+                    if (profile == "auto")
+                        _adaptiveTimeout = (int)Math.Clamp(rtt * 3, 500, 10000);
+                    text = $"{rtt} мс";
+                }
+                else
+                {
+                    text = profile == "auto"
+                        ? $"{_adaptiveTimeout} мс (по умолчанию, хост не пингуется)"
+                        : null;
+                }
+
                 text = alive is not null
-                    ? $"Хост отвечает на ping, {rtt} мс · {alive}"
+                    ? $"Хост отвечает на ping, {text} · {alive}"
                     : "Хост не отвечает на ping (ICMP может быть запрещён)";
             }
             catch (Exception ex)
@@ -216,11 +261,11 @@ public sealed class ScanService
     }
 
     private static async Task<PortResult?> CheckTcpAsync(
-        IPAddress[] ips, int port, int timeoutMs, bool grabBanner, bool includeClosed, CancellationToken ct)
+        IPAddress[] ips, int port, int timeoutMs, bool grabBanner, bool includeClosed, int retries, CancellationToken ct)
     {
         var timeout = TimeSpan.FromMilliseconds(timeoutMs);
         // пробуем подключиться по каждому адресу хоста — кто первым ответил, тот и есть
-        var attempts = ips.Select(ip => TryConnectAsync(ip, port, timeout, ct)).ToList();
+        var attempts = ips.Select(ip => TryConnectAsync(ip, port, timeout, retries, ct)).ToList();
 
         TcpClient? winner = null;
         var rest = new List<Task<TcpClient?>>(attempts);
@@ -263,9 +308,9 @@ public sealed class ScanService
     }
 
     private static async Task<TcpClient?> TryConnectAsync(
-        IPAddress ip, int port, TimeSpan timeout, CancellationToken ct)
+        IPAddress ip, int port, TimeSpan timeout, int retries, CancellationToken ct)
     {
-        for (var attempt = 0; attempt < 2; attempt++)
+        for (var attempt = 0; attempt < retries; attempt++)
         {
             var tcp = new TcpClient(ip.AddressFamily);
             try
@@ -273,10 +318,10 @@ public sealed class ScanService
                 await tcp.ConnectAsync(ip, port, ct).AsTask().WaitAsync(timeout, ct);
                 return tcp;
             }
-            catch (TimeoutException) when (attempt == 0)
+            catch (TimeoutException) when (attempt < retries - 1)
             {
                 // Таймаут — не отказ. На нестабильных каналах (интернет) пакет мог потеряться,
-                // а порт на самом деле открыт: одна повторная попытка. Отказ (RST) не повторяем.
+                // а порт на самом деле открыт: повторная попытка (профилем WAN/AUTO). Отказ (RST) не повторяем.
                 tcp.Dispose();
             }
             catch

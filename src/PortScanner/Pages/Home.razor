@@ -43,15 +43,15 @@
 <div class="form-grid">
     <label>
         IP-адрес или хост
-        <input @bind="Host" placeholder="192.168.1.1" disabled="@IsScanning" />
+        <input @bind="Host" @bind:after="SaveSettings" placeholder="192.168.1.1" disabled="@IsScanning" />
     </label>
     <label style="grid-column: span 2;">
         Порты (через запятую и тире)
-        <input @bind="PortsText" placeholder="1-1024, 502, 8080" disabled="@IsScanning" />
+        <input @bind="PortsText" @bind:after="SaveSettings" placeholder="1-1024, 502, 8080" disabled="@IsScanning" />
     </label>
     <label>
         Таймаут, мс
-        <input type="number" @bind="TimeoutMs" min="100" max="30000" disabled="@IsScanning" />
+        <input type="number" @bind="TimeoutMs" @bind:after="SaveSettings" min="100" max="30000" disabled="@IsScanning" />
     </label>
     <div>
         @if (!IsScanning)
@@ -65,11 +65,15 @@
         }
     </div>
     <div class="checks">
-        <label title="TCP: открыт, если удалось установить соединение"><input type="checkbox" @bind="DoTcp" disabled="@IsScanning" /> TCP</label>
-        <label title="UDP: открыт при ответе; без ответа результат неопределён"><input type="checkbox" @bind="DoUdp" disabled="@IsScanning" /> UDP</label>
-        <label title="Баннер — текстовый ответ службы: для TCP приветствие или ответ на HTTP-запрос, для UDP первый ответ на пробу"><input type="checkbox" @bind="DoBanner" disabled="@IsScanning" /> Баннер</label>
-        <label title="Проверка ICMP при старте и далее каждые 5 секунд"><input type="checkbox" @bind="DoPing" disabled="@IsScanning" /> Ping (ICMP)</label>
-        <label title="Для узла в интернете: устанавливает таймаут 5 с, чтобы дальний хост успевал отвечать"><input type="checkbox" checked="@IsWan" @onchange="ToggleWan" disabled="@IsScanning" /> WAN</label>
+        <label title="TCP: открыт, если удалось установить соединение"><input type="checkbox" @bind="DoTcp" @bind:after="SaveSettings" disabled="@IsScanning" /> TCP</label>
+        <label title="UDP: открыт при ответе; без ответа результат неопределён"><input type="checkbox" @bind="DoUdp" @bind:after="SaveSettings" disabled="@IsScanning" /> UDP</label>
+        <label title="Баннер — текстовый ответ службы: для TCP приветствие или ответ на HTTP-запрос, для UDP первый ответ на пробу"><input type="checkbox" @bind="DoBanner" @bind:after="SaveSettings" disabled="@IsScanning" /> Баннер</label>
+        <label title="Проверка ICMP при старте и далее каждые 5 секунд"><input type="checkbox" @bind="DoPing" @bind:after="SaveSettings" disabled="@IsScanning" /> Ping (ICMP)</label>
+        <div class="net-switch" title="LAN — быстро: таймаут 1 с, максимум параллелизма, 1 попытка. WAN — точно: таймаут 5 с, меньше параллелизм, 3 попытки. AUTO — таймаут автоматически подстраивается под пинг (500–10000 мс), пинг адаптируется к сети.">
+            <button type="button" class="@(NetMode == "lan" ? "active" : "")" @onclick='() => SetNetMode("lan")' disabled="@IsScanning">LAN</button>
+            <button type="button" class="@(NetMode == "auto" ? "active" : "")" @onclick='() => SetNetMode("auto")' disabled="@IsScanning">AUTO</button>
+            <button type="button" class="@(NetMode == "wan" ? "active" : "")" @onclick='() => SetNetMode("wan")' disabled="@IsScanning">WAN</button>
+        </div>
     </div>
 </div>
 
@@ -229,14 +233,15 @@
                     <p>Сканер сначала ждёт приветствие службы. Для типичных веб-портов дополнительно отправляет HTTP-запрос <code>HEAD /</code>. Для UDP баннер — это первый ответ службы на пробную датаграмму. Пустой баннер — это нормально: многие службы не сообщают название или используют шифрование. <strong>Отсутствие баннера не означает, что порт закрыт.</strong></p>
                 </section>
                 <section>
-                    <h3>Таймаут</h3>
+                    <h3>Таймаут и профили сети</h3>
                     <p><strong>Таймаут — это сколько миллисекунд сканер ждёт ответа при проверке каждого порта.</strong> Если служба не ответила за это время, порт считается закрытым или неопределённым.</p>
+                    <p>Переключатель рядом с протоколами задаёт профиль:</p>
                     <ul>
-                        <li><code>100–500 мс</code> — быстрая локальная сеть, «живые» устройства;</li>
-                        <li><code>1000 мс</code> — разумное значение по умолчанию;</li>
-                        <li><code>2000–30000 мс</code> — медленные, загруженные или удалённые устройства.</li>
+                        <li><strong>LAN</strong> — быстро: таймаут 1 с, максимальная параллельность, одна попытка. Для локальной сети;</li>
+                        <li><strong>WAN</strong> — точно: таймаут 5 с, меньше параллелизм, до 3 попыток при потере пакета. Для интернета и дальних VPN;</li>
+                        <li><strong>AUTO</strong> — саморегулировка: таймаут выставляется от замеренного пинга (×3, в коридоре 500–10000 мс) и подстраивается каждые 5 с; сам пинг адаптируется к сети (200–2000 мс). Хороший выбор «не думая».</li>
                     </ul>
-                    <p>Слишком короткий таймаут может дать ложные «закрыто» на медленных службах; слишком длинный заметно растягивает сканирование больших диапазонов. При сканировании через интернет ставьте таймаут побольше (2000–5000 мс): на дальних каналах короткий таймаут даёт ложные «закрыто» на реально открытых портах.</p>
+                    <p>Слишком короткий таймаут может дать ложные «закрыто» на медленных службах; слишком длинный заметно растягивает сканирование больших диапазонов.</p>
                 </section>
                 <section>
                     <h3>TCP, UDP и ping</h3>
@@ -271,7 +276,7 @@
     private bool DoUdp { get; set; }
     private bool DoBanner { get; set; } = true;
     private bool DoPing { get; set; } = true;
-    private bool IsWan { get; set; }
+    private string NetMode { get; set; } = "lan"; // lan | auto | wan
 
     private bool IsScanning;
     private bool ScanCompleted;
@@ -408,6 +413,7 @@
                 LocalIps = ips?.Addresses ?? new List<string>();
             }
             catch { /* API может быть ещё не поднят — подсказка не критична */ }
+            await LoadSettings();
             StateHasChanged();
         }
 
@@ -541,7 +547,8 @@
                 tcp = DoTcp,
                 udp = DoUdp,
                 banner = DoBanner,
-                ping = DoPing
+                ping = DoPing,
+                profile = NetMode
             });
             var body = await response.Content.ReadFromJsonAsync<ScanStartResponse>();
             if (body?.Error != null)
@@ -564,13 +571,100 @@
         _ = PollLoop();
     }
 
-    private void ToggleWan(ChangeEventArgs e)
+    private void SetNetMode(string mode)
     {
-        IsWan = e.Value is bool b && b;
-        TimeoutMs = IsWan ? 5000 : 1000;
+        NetMode = mode;
+        TimeoutMs = mode switch
+        {
+            "wan" => 5000,
+            "auto" => 2000, // базовый, пока AUTO не откалибруется по пингу
+            _ => 1000,
+        };
+        SaveSettings();
     }
 
-    private void ToggleOnlyOpen(ChangeEventArgs e) => OnlyOpen = e.Value is bool b && b;
+    private async Task SaveSettings()
+    {
+        try
+        {
+            var json = System.Text.Json.JsonSerializer.Serialize(new UiSettings
+            {
+                Host = Host,
+                Ports = PortsText,
+                TimeoutMs = TimeoutMs,
+                Tcp = DoTcp,
+                Udp = DoUdp,
+                Banner = DoBanner,
+                Ping = DoPing,
+                NetMode = NetMode,
+                OnlyOpen = OnlyOpen,
+            });
+            await JS.InvokeVoidAsync("localStorage.setItem", "portscan-settings", json);
+        }
+        catch { }
+    }
+
+    private async Task LoadSettings()
+    {
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("localStorage.getItem", "portscan-settings");
+            if (string.IsNullOrEmpty(json))
+                return;
+            var s = System.Text.Json.JsonSerializer.Deserialize<UiSettings>(json);
+            if (s is null)
+                return;
+            if (!string.IsNullOrWhiteSpace(s.Host)) Host = s.Host;
+            if (!string.IsNullOrWhiteSpace(s.Ports)) PortsText = s.Ports;
+            if (s.TimeoutMs is >= 100 and <= 30000) TimeoutMs = s.TimeoutMs;
+            DoTcp = s.Tcp;
+            DoUdp = s.Udp;
+            DoBanner = s.Banner;
+            DoPing = s.Ping;
+            if (s.NetMode is "lan" or "auto" or "wan") NetMode = s.NetMode;
+            OnlyOpen = s.OnlyOpen;
+        }
+        catch { }
+    }
+
+    private sealed class UiSettings
+    {
+        public string? Host { get; set; }
+        public string? Ports { get; set; }
+        public int TimeoutMs { get; set; }
+        public bool Tcp { get; set; } = true;
+        public bool Udp { get; set; }
+        public bool Banner { get; set; } = true;
+        public bool Ping { get; set; } = true;
+        public string NetMode { get; set; } = "lan";
+        public bool OnlyOpen { get; set; } = true;
+    }
+
+    private void ToggleOnlyOpen(ChangeEventArgs e)
+    {
+        OnlyOpen = e.Value is bool b && b;
+        SaveSettings();
+        // сканирование не идёт, но на сервере лежат результаты последнего —
+        // догружаем полный статус, чтобы закрытые появились/исчезли сразу
+        if (!IsScanning)
+            _ = RefreshResultsAsync();
+    }
+
+    private async Task RefreshResultsAsync()
+    {
+        try
+        {
+            var status = await Http.GetFromJsonAsync<ScanStatus>(OnlyOpen
+                ? "api/scan/status"
+                : "api/scan/status?all=1");
+            if (status?.Results is not null)
+            {
+                Results = status.Results.ToList();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch { }
+    }
 
     /// <summary>Парсит поле портов: "1-1024, 502, 8080, 9600". Дубликаты убираются, список сортируется.</summary>
     private static bool TryParsePorts(string text, out List<int> ports, out string? error)
@@ -700,6 +794,15 @@
                 {
                     IsScanning = false;
                     ScanCompleted = true;
+                    // последний опрос мог идти без закрытых портов (режим «только открытые») —
+                    // догружаем полный результат, чтобы галочка работала и после сканирования
+                    try
+                    {
+                        var final = await Http.GetFromJsonAsync<ScanStatus>("api/scan/status?all=1");
+                        if (final?.Results is not null)
+                            Results = final.Results.ToList();
+                    }
+                    catch { }
                     AddLog(_cancelRequested
                         ? "Сканирование отменено."
                         : $"Сканирование завершено. Найдено: {Results.Count(r => r.Status != "closed")}.");

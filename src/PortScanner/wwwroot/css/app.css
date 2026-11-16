@@ -552,3 +552,18 @@ input:focus-visible {
 
 /* Закрытые порты (режим «показывать все») — приглушённый статус */
 .st-closed { color: var(--text-soft); }
+
+/* Трёхпозиционный переключатель сети LAN / AUTO / WAN */
+.net-switch { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; align-self: end; }
+.net-switch button {
+  padding: 6px 14px;
+  background: transparent;
+  color: var(--text-soft);
+  border: 0;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.net-switch button + button { border-left: 1px solid var(--line); }
+.net-switch button.active { background: var(--accent); color: var(--accent-text); }
+.net-switch button:disabled { opacity: .5; cursor: default; }
