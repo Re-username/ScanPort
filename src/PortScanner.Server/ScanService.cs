@@ -22,9 +22,6 @@ public sealed class ScanService
         int Scanned, int Total, IReadOnlyList<PortResult> Results,
         bool Running, string? Error, string? Ping, bool Paused, int Timeout);
 
-    private static readonly HashSet<int> WebPorts = new()
-        { 80, 81, 82, 83, 88, 3000, 3128, 5000, 5080, 8000, 8008, 8080, 8081, 8888, 9000, 10000 };
-
     private static readonly byte[] UdpProbe = { 0x00 };
 
     private const int MaxParallelism = 128;
@@ -338,7 +335,10 @@ public sealed class ScanService
             var buffer = new byte[512];
             var text = await TryReadAsync(stream, buffer, timeoutMs, ct);
 
-            if (string.IsNullOrEmpty(text) && WebPorts.Contains(port))
+            // HTTP-serveр не шлёт приветствие сам — спрашиваем. Раньше запрос уходил
+            // только на порты из WebPorts; теперь на любой открытый порт: так находятся
+            // веб-морды на нестандартных портах (перенесённые службы, пробросы).
+            if (string.IsNullOrEmpty(text))
             {
                 var request = Encoding.ASCII.GetBytes("HEAD / HTTP/1.0\r\n\r\n");
                 await stream.WriteAsync(request, 0, request.Length, ct).WaitAsync(TimeSpan.FromMilliseconds(timeoutMs), ct);
