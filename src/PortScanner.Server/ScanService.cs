@@ -213,6 +213,7 @@ public sealed class ScanService
 
     private async Task PingLoopAsync(IPAddress[] ips, int baseTimeoutMs, string profile, CancellationToken ct)
     {
+        var consecutiveFails = 0; // гистерезис: «не отвечает» только после 2 промахов подряд
         while (!ct.IsCancellationRequested)
         {
             string text;
@@ -254,6 +255,7 @@ public sealed class ScanService
 
                 if (alive is not null)
                 {
+                    consecutiveFails = 0;
                     _lastRtt = (int)rtt;
                     // AUTO: регулируем таймаут проверок портов по замеру канала.
                     // ×8 — запас на джиттер: пинг 100 мс → таймаут 800 мс; жёсткий коридор 500–10000 мс.
@@ -265,7 +267,12 @@ public sealed class ScanService
                 }
                 else
                 {
-                    text = "Хост не отвечает на ping (ICMP может быть запрещён)";
+                    consecutiveFails++;
+                    // одиночная потеря — ещё не «молчит» (показываем последний живой статус)
+                    if (consecutiveFails < 2 && _ping is not null)
+                        text = _ping;
+                    else
+                        text = "Хост не отвечает на ping (ICMP может быть запрещён)";
                 }
             }
             catch (Exception ex)
