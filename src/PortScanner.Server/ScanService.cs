@@ -12,7 +12,7 @@ namespace PortScanner.Server;
 public sealed class ScanService
 {
     public sealed record ScanRequest(
-        string? Host, int StartPort, int EndPort, int TimeoutMs,
+        string? Host, int[]? Ports, int TimeoutMs,
         bool Tcp, bool Udp, bool Banner, bool Ping, bool Closed);
 
     public sealed record PortResult(int Port, string Protocol, string Status, string? Banner);
@@ -49,8 +49,10 @@ public sealed class ScanService
 
         if (string.IsNullOrWhiteSpace(req.Host))
             return "Введите IP-адрес или имя хоста.";
-        if (req.StartPort < 1 || req.StartPort > 65535 || req.EndPort < 1 || req.EndPort > 65535 || req.StartPort > req.EndPort)
-            return "Некорректный диапазон портов (допустимо: 1–65535, от ≤ до).";
+        if (req.Ports is null || req.Ports.Length == 0)
+            return "Укажите хотя бы один порт.";
+        if (req.Ports.Any(p => p is < 1 or > 65535))
+            return "Порты должны быть в диапазоне 1–65535.";
         if (req.TimeoutMs is < 100 or > 30000)
             return "Таймаут должен быть от 100 до 30000 мс.";
         if (!req.Tcp && !req.Udp)
@@ -117,7 +119,7 @@ public sealed class ScanService
         }
 
         var checks = new List<(string Proto, int Port)>();
-        for (var port = req.StartPort; port <= req.EndPort; port++)
+        foreach (var port in req.Ports!.Distinct().OrderBy(p => p))
         {
             if (req.Tcp) checks.Add(("tcp", port));
             if (req.Udp) checks.Add(("udp", port));

@@ -45,13 +45,9 @@
         IP-адрес или хост
         <input @bind="Host" placeholder="192.168.1.1" disabled="@IsScanning" />
     </label>
-    <label>
-        Порт от
-        <input type="number" @bind="StartPort" min="1" max="65535" disabled="@IsScanning" />
-    </label>
-    <label>
-        Порт до
-        <input type="number" @bind="EndPort" min="1" max="65535" disabled="@IsScanning" />
+    <label style="grid-column: span 2;">
+        Порты (через запятую и тире)
+        <input @bind="PortsText" placeholder="1-1024, 502, 8080" disabled="@IsScanning" />
     </label>
     <label>
         Таймаут, мс
@@ -217,13 +213,15 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
                     }
                 </section>
                 <section>
-                    <h3>Диапазон портов</h3>
-                    <p>Допустимы значения от <strong>1 до 65535</strong>, границы входят в проверку. Порт «от» не может быть больше порта «до».</p>
+                    <h3>Порты</h3>
+                    <p>Порты задаются одним полем: через запятую, диапазоны — через тире. Дубликаты удаляются, список сортируется.</p>
                     <ul>
-                        <li><code>80 — 80</code> — проверить один порт;</li>
-                        <li><code>1 — 1024</code> — стандартные системные и сетевые службы;</li>
-                        <li><code>8000 — 8100</code> — альтернативные веб-интерфейсы;</li>
-                        <li><code>1 — 65535</code> — полная проверка, может занять много времени.</li>
+                        <li><code>80</code> — один порт;</li>
+                        <li><code>1-1024</code> — стандартные системные и сетевые службы;</li>
+                        <li><code>80, 443, 8080</code> — несколько разных;</li>
+                        <li><code>502, 9600, 44818</code> — типичные порты PLC (Modbus, FINS, EtherNet/IP);</li>
+                        <li><code>22, 80-90, 443</code> — комбинация;</li>
+                        <li><code>1-65535</code> — полная проверка, может занять много времени.</li>
                     </ul>
                 </section>
                 <section>
@@ -268,8 +266,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     private const int MaxLogEntries = 2000;
 
     private string Host { get; set; } = "127.0.0.1";
-    private int StartPort { get; set; } = 1;
-    private int EndPort { get; set; } = 1024;
+    private string PortsText { get; set; } = "1-1024";
     private int TimeoutMs { get; set; } = 1000;
     private bool DoTcp { get; set; } = true;
     private bool DoUdp { get; set; }
@@ -519,9 +516,9 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
             ErrorMessage = "Введите IP-адрес или имя хоста.";
             return;
         }
-        if (StartPort < 1 || StartPort > 65535 || EndPort < 1 || EndPort > 65535 || StartPort > EndPort)
+        if (!TryParsePorts(PortsText, out var ports, out var portsError))
         {
-            ErrorMessage = "Некорректный диапазон портов (допустимо: 1–65535, от ≤ до).";
+            ErrorMessage = portsError;
             return;
         }
         if (TimeoutMs < 100 || TimeoutMs > 30000)
@@ -540,8 +537,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
             var response = await Http.PostAsJsonAsync("api/scan/start", new
             {
                 host = Host.Trim(),
-                startPort = StartPort,
-                endPort = EndPort,
+                ports,
                 timeoutMs = TimeoutMs,
                 tcp = DoTcp,
                 udp = DoUdp,
@@ -565,7 +561,7 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
             return;
         }
 
-        AddLog($"Сканирование запущено: {Host.Trim()} [{MethodsText()}], порты {StartPort}–{EndPort} (таймаут {TimeoutMs} мс)", "dim");
+        AddLog($"Сканирование запущено: {Host.Trim()} [{MethodsText()}], порты {PortsText.Trim()} (таймаут {TimeoutMs} мс)", "dim");
         IsScanning = true;
         _ = PollLoop();
     }
@@ -577,6 +573,68 @@ else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
     }
 
     private void ToggleOnlyOpen(ChangeEventArgs e) => OnlyOpen = e.Value is bool b && b;
+
+    /// <summary>Парсит поле портов: "1-1024, 502, 8080, 9600". Дубликаты убираются, список сортируется.</summary>
+    private static bool TryParsePorts(string text, out List<int> ports, out string? error)
+    {
+        ports = new List<int>();
+        var seen = new HashSet<int>();
+        foreach (var token in text.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var dash = token.IndexOf('-');
+            try
+            {
+                if (dash >= 0)
+                {
+                    if (dash == 0 || dash == token.Length - 1)
+                        throw new FormatException();
+                    var a = int.Parse(token[..dash]);
+                    var b = int.Parse(token[(dash + 1)..]);
+                    if (a > b)
+                        (a, b) = (b, a);
+                    for (var p = a; p <= b; p++)
+                        if (seen.Add(p))
+                            ports.Add(p);
+                }
+                else
+                {
+                    var p = int.Parse(token);
+                    if (seen.Add(p))
+                        ports.Add(p);
+                }
+            }
+            catch (FormatException)
+            {
+                error = $"Не понял фрагмент «{token}». Формат: 1-1024, 502, 8080";
+                return false;
+            }
+            catch (OverflowException)
+            {
+                error = $"Слишком большое число в фрагменте «{token}». Порты — от 1 до 65535.";
+                return false;
+            }
+        }
+
+        if (ports.Count == 0)
+        {
+            error = "Укажите хотя бы один порт, например: 1-1024, 502";
+            return false;
+        }
+        if (ports.Exists(p => p < 1 || p > 65535))
+        {
+            error = "Порты должны быть в диапазоне 1–65535.";
+            return false;
+        }
+        if (ports.Count > 65535)
+        {
+            error = "Слишком много портов — максимум 65535 уникальных.";
+            return false;
+        }
+
+        ports.Sort();
+        error = null;
+        return true;
+    }
 
     private string MethodsText()    {
         var list = new List<string>();

@@ -2,7 +2,7 @@
 #   powershell -ExecutionPolicy Bypass -File tools/build-release.ps1
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
-$ver = '1.5.3'
+$ver = '1.5.4'
 
 # NuGet-кэш для MAUI-сборок (как в build-android.ps1)
 if (-not $env:NUGET_PACKAGES) { $env:NUGET_PACKAGES = 'D:\nuget-packages' }
