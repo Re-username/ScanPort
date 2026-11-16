@@ -10,7 +10,7 @@ namespace SfxStub;
 
 internal static class Program
 {
-    private const string Version = "1.7.1";
+    private const string Version = "1.7.2";
 
     [STAThread]
     private static void Main()

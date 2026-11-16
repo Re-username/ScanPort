@@ -216,6 +216,21 @@
                     }
                 </section>
                 <section>
+                    <h3>Что может определить сканер</h3>
+                    <p>Определение службы — это всегда <strong>реальный ответ устройства</strong>, а не угадывание по номеру порта. Сканер пробует методы по очереди, пока что-то не сработает:</p>
+                    <ul>
+                        <li><strong>Приветствие службы</strong> (TCP): многие протоколы представляются сами сразу после подключения — <code>SSH-2.0-OpenSSH_9.6</code>, <code>220 FTP ready</code>, SMTP, POP3. Работает на <strong>любом порту</strong>: SSH на 4022 или проброс 2223→22 определится правильно.</li>
+                        <li><strong>Веб-интерфейсы (HTTP)</strong>: сервер молчит, пока его не спросить — сканер шлёт <code>HEAD /</code> на любой открытый порт. Ответ вида <code>HTTP/1.1 200 OK · Server: nginx</code>. Веб-морды PLC/HMI на нестандартных портах находятся так же.</li>
+                        <li><strong>HTTPS / TLS</strong>: выполняется настоящий TLS-рукопожатие (с именем хоста), баннер показывает <strong>сертификат</strong> — <code>TLS: github.com</code>, а для HTTPS поверх TLS дополнительно заголовок <code>Server</code>.</li>
+                        <li><strong>EtherNet/IP ListIdentity</strong> (порт 44818, TCP и UDP): устройство само называет вендора и модель — <code>Omron · NX1P2</code>, <code>Allen-Bradley/Rockwell · 1756-EN2T</code>. Именно так Shodan узнаёт устройства: это ответ самого контроллера.</li>
+                        <li><strong>Modbus Read Device Identification</strong> (порт 502): VendorName, ProductCode, Revision — контроллеры Siemens, Omron, WAGO, Schneider отвечают.</li>
+                        <li><strong>SNMP sysDescr</strong> (порт 161, community «public»): сетевое оборудование называет себя строкой вида <code>MikroTik RouterOS 7.x</code>, <code>Omron … Switch</code> — самый информативный опрос для свитчей и точек доступа.</li>
+                        <li><strong>UDP</strong>: первый ответ службы на пробную датаграмму (эхо, DNS и др.).</li>
+                        <li><strong>Справочник портов</strong>: если баннер пуст, в колонке «Сервис / баннер» показывается типичная служба для этого порта (<code>VNC</code>, <code>Modbus TCP</code>, <code>OPC UA</code>…). Это <strong>подсказка, а не обнаружение</strong> — например, у закрытого порта 22 она честно показывает «SSH».</li>
+                    </ul>
+                    <p><strong>Что определить нельзя:</strong> шифрованные протоколы без читаемого приветствия (RDP, большинство VPN) — о них можно судить только по номеру порта. Отсутствие баннера не означает, что порт закрыт.</p>
+                </section>
+                <section>
                     <h3>Порты</h3>
                     <p>Порты задаются одним полем: через запятую, диапазоны — через тире. Дубликаты удаляются, список сортируется.</p>
                     <ul>
