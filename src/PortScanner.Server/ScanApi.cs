@@ -16,9 +16,9 @@ public static class ScanApi
             return Results.Content(json, "application/json; charset=utf-8");
         });
 
-        app.MapGet("/api/scan/status", (ScanService scans) =>
+        app.MapGet("/api/scan/status", (ScanService scans, bool all) =>
         {
-            var (_, json) = ScanApiCore.Status(scans);
+            var (_, json) = ScanApiCore.Status(scans, all);
             return Results.Content(json, "application/json; charset=utf-8");
         });
 

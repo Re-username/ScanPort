@@ -72,14 +72,14 @@ public sealed class MiniHttpServer
             try
             {
                 var reader = new RequestReader(client.GetStream());
-                var (method, path, body) = await reader.ReadRequestAsync();
+                var (method, path, query, body) = await reader.ReadRequestAsync();
                 if (method is null)
                     return;
 
                 var (status, json) = (method, path) switch
                 {
                     ("POST", "/api/scan/start") => ScanApiCore.Start(_scans, body ?? ""),
-                    ("GET", "/api/scan/status") => ScanApiCore.Status(_scans),
+                    ("GET", "/api/scan/status") => ScanApiCore.Status(_scans, query.Contains("all=1") || query.Contains("all=true")),
                     ("POST", "/api/scan/cancel") => ScanApiCore.Cancel(_scans),
                     ("POST", "/api/scan/pause") => ScanApiCore.Pause(_scans),
                     ("GET", "/api/scan/addresses") => ScanApiCore.Addresses(),
@@ -125,19 +125,30 @@ public sealed class MiniHttpServer
             _stream = stream;
         }
 
-        public async Task<(string? Method, string Path, string? Body)> ReadRequestAsync()
+        public async Task<(string? Method, string Path, string Query, string? Body)> ReadRequestAsync()
         {
             var headerText = await ReadBlockAsync();
             if (headerText is null)
-                return (null, "", null);
+                return (null, "", "", null);
 
             var lines = headerText.Split("\r\n");
             var parts = lines[0].Split(' ');
             if (parts.Length < 2)
-                return (null, "", null);
+                return (null, "", "", null);
 
             var method = parts[0].ToUpperInvariant();
-            var path = parts[1].Split('?')[0].TrimEnd('/');
+            string path, query;
+            var qIdx = parts[1].IndexOf('?');
+            if (qIdx >= 0)
+            {
+                path = parts[1][..qIdx].TrimEnd('/');
+                query = parts[1][(qIdx + 1)..];
+            }
+            else
+            {
+                path = parts[1].TrimEnd('/');
+                query = "";
+            }
 
             var contentLength = 0;
             var chunked = false;
@@ -156,10 +167,10 @@ public sealed class MiniHttpServer
             }
 
             if (chunked)
-                return (method, path, await ReadChunkedBodyAsync());
+                return (method, path, query, await ReadChunkedBodyAsync());
             if (contentLength > 0)
-                return (method, path, Encoding.UTF8.GetString(await ReadBytesAsync(contentLength)));
-            return (method, path, null);
+                return (method, path, query, Encoding.UTF8.GetString(await ReadBytesAsync(contentLength)));
+            return (method, path, query, null);
         }
 
         /// <summary>Читает до пустой строки (\r\n\r\n) — блок заголовков без завершающего разделителя.</summary>

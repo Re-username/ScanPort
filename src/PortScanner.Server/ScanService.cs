@@ -13,7 +13,7 @@ public sealed class ScanService
 {
     public sealed record ScanRequest(
         string? Host, int[]? Ports, int TimeoutMs,
-        bool Tcp, bool Udp, bool Banner, bool Ping, bool Closed);
+        bool Tcp, bool Udp, bool Banner, bool Ping);
 
     public sealed record PortResult(int Port, string Protocol, string Status, string? Banner);
 
@@ -70,13 +70,17 @@ public sealed class ScanService
         return _paused;
     }
 
-    public ScanStatus GetStatus()
+    public ScanStatus GetStatus(bool includeClosed)
     {
         lock (_gate)
         {
             // порядок не важен: клиент сортирует для отображения сам.
-            // Сортировка здесь на каждый опрос — лишняя работа при тысячах результатов.
-            return new ScanStatus(_scanned, _total, _results.ToArray(), _running, _error, _ping, _paused);
+            // Закрытые порты (режим «все») отдаём только по запросу — иначе каждый
+            // опрос тащил бы десятки тысяч строк, даже когда показаны только открытые.
+            IEnumerable<PortResult> snapshot = _results;
+            if (!includeClosed)
+                snapshot = snapshot.Where(r => r.Status != "closed");
+            return new ScanStatus(_scanned, _total, snapshot.ToArray(), _running, _error, _ping, _paused);
         }
     }
 
@@ -142,7 +146,7 @@ public sealed class ScanService
                             await Task.Delay(150, token);
 
                         PortResult? result = check.Proto == "tcp"
-                            ? await CheckTcpAsync(ips, check.Port, req.TimeoutMs, req.Banner, req.Closed, token)
+                            ? await CheckTcpAsync(ips, check.Port, req.TimeoutMs, req.Banner, includeClosed: true, token)
                             : await CheckUdpAsync(ips, check.Port, req.TimeoutMs, token);
                         if (result is not null)
                             AddResult(result);

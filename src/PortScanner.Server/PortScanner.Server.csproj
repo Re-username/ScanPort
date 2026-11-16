@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- Версия приложения: единственное место -->
-    <Version>1.5.4</Version>
+    <Version>1.5.5</Version>
     <AssemblyName>ScanPort</AssemblyName>
     <RootNamespace>PortScanner.Server</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>

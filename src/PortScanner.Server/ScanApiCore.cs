@@ -38,8 +38,8 @@ public static class ScanApiCore
         return (200, JsonSerializer.Serialize(new { error }, JsonOptions));
     }
 
-    public static (int Status, string Json) Status(ScanService scans) =>
-        (200, JsonSerializer.Serialize(scans.GetStatus(), JsonOptions));
+    public static (int Status, string Json) Status(ScanService scans, bool includeClosed) =>
+        (200, JsonSerializer.Serialize(scans.GetStatus(includeClosed), JsonOptions));
 
     public static (int Status, string Json) Cancel(ScanService scans)
     {
