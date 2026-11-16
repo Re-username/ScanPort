@@ -100,20 +100,20 @@
     </div>
 }
 
-@if (Results.Count > 0)
-{
-    @* материализуем отсортированный/отфильтрованный список один раз на рендер:
-       Virtualize рисует только видимые строки — таблица из десятков тысяч
-       портов прокручивается без подвисаний *@
+@{
+    // материализуем отсортированный/отфильтрованный список один раз на рендер:
+    // Virtualize рисует только видимые строки — таблица из десятков тысяч
+    // портов прокручивается без подвисаний
     var list = SortedResults.ToList();
-    <div class="results-heading">
-        <h3><button type="button" class="collapse-btn" @onclick="() => ResultsVisible = !ResultsVisible">Найдено (@list.Count) <span class="collapse-mark">@(ResultsVisible ? "▾" : "▸")</span></button></h3>
-        <label class="open-only" title="Включена — только открытые порты. Выключенная — все проверенные, включая закрытые; переключается в любой момент"><input type="checkbox" checked="@OnlyOpen" @onchange="ToggleOnlyOpen" /> только открытые</label>
-        <button type="button" class="btn btn-small" @onclick="CopyResults" disabled="@(Results.Count == 0)" title="Скопировать таблицу (порт, протокол, статус, сервис) в буфер обмена">@(_resultsCopied ? "✓ скопировано" : "Копировать")</button>
-        <input class="filter-input" @bind="ResultsFilter" @bind:event="oninput" placeholder="Поиск по результатам…" title="Поиск по порту, протоколу, статусу, названию службы или баннеру" />
-    </div>
-    @if (ResultsVisible)
-    {
+}
+<div class="results-heading">
+    <h3><button type="button" class="collapse-btn" @onclick="() => ResultsVisible = !ResultsVisible">Найдено (@list.Count) <span class="collapse-mark">@(ResultsVisible ? "▾" : "▸")</span></button></h3>
+    <label class="open-only" title="Включена — только открытые порты. Выключенная — все проверенные, включая закрытые; переключается в любой момент"><input type="checkbox" checked="@OnlyOpen" @onchange="ToggleOnlyOpen" /> только открытые</label>
+    <button type="button" class="btn btn-small" @onclick="CopyResults" disabled="@(Results.Count == 0)" title="Скопировать таблицу (порт, протокол, статус, сервис) в буфер обмена">@(_resultsCopied ? "✓ скопировано" : "Копировать")</button>
+    <input class="filter-input" @bind="ResultsFilter" @bind:event="oninput" placeholder="Поиск по результатам…" title="Поиск по порту, протоколу, статусу, названию службы или баннеру" />
+</div>
+@if (ResultsVisible && Results.Count > 0)
+{
     <div class="results-table">
         <table>
             <thead>
@@ -146,10 +146,10 @@
     </div>
     }
 }
-else if (ScanCompleted && string.IsNullOrEmpty(ErrorMessage))
+@if (ScanCompleted && Results.Count == 0 && string.IsNullOrEmpty(ErrorMessage))
 {
     <div class="alert info">
-        Открытые порты не найдены. Проверьте диапазон и таймаут. Отсутствие ответа на ping не означает,
+        Открытые порты не найдены. Проверьте список портов и таймаут. Отсутствие ответа на ping не означает,
         что TCP-порты закрыты: сканирование соединений выполняется независимо.
     </div>
 }
