@@ -231,6 +231,21 @@
                     <p><strong>Что определить нельзя:</strong> шифрованные протоколы без читаемого приветствия (RDP, большинство VPN) — о них можно судить только по номеру порта. Отсутствие баннера не означает, что порт закрыт.</p>
                 </section>
                 <section>
+                    <h3>Какие устройства можно обнаружить</h3>
+                    <p>Фиксированного списка нет: определяется <strong>любое устройство, которое отвечает</strong>. Типичные примеры:</p>
+                    <ul>
+                        <li><strong>PLC и контроллеры</strong>: Omron NX/NJ/CP — отвечают именем модели по EtherNet/IP («Omron · NX1P2»); Siemens SIMATIC — порт 102 (S7) и SNMP; Allen-Bradley/CompactLogix — EtherNet/IP; Schneider/WAGO/ABB и другие Modbus-контроллеры, частотники, счётчики, реле — Read Device Identification на 502; Mitsubishi Q/L — порт 5001; контроллеры с CODESYS — 11740/53478; Phoenix Contact — PCWorx (1962); ProConOS-устройства — 20547.</li>
+                        <li><strong>HMI-панели и веб-морды</strong>: по HTTP/HTTPS — заголовок Server или сертификат; Omron NA/NX-панели, Siemens Comfort, Weintek и аналоги.</li>
+                        <li><strong>Сетевое оборудование</strong> (свитчи, роутеры, точки доступа): SNMP sysDescr называет модель и прошивку — MikroTik, Cisco, TP-Link, Omron-коммутаторы. Если SNMP закрыт — хотя бы веб-интерфейс.</li>
+                        <li><strong>Камеры и регистраторы</strong>: RTSP (554), веб-интерфейсы (80/8000/8080), ONVIF.</li>
+                        <li><strong>Телефония</strong>: SIP-приборы (АТС, телефоны) — 5060/5061.</li>
+                        <li><strong>Диспетчеризация и здания</strong>: BACnet-контроллеры (47808), KNX-шлюзы (3671), RTU по IEC-104 (2404) и DNP3 (20000).</li>
+                        <li><strong>Серверы и службы</strong>: SSH/FTP/HTTP(S), базы данных (MySQL/PostgreSQL/MSSQL/Oracle), Redis, MongoDB, Docker (2375/2376), Kubernetes (6443), MQTT-брокеры (1883/8883), OPC UA (4840), Niagara/SCADA (1911), Node-RED (1880), Home Assistant (8123).</li>
+                        <li><strong>Офисные устройства</strong>: Windows-машины (SMB 445, RDP 3389, WinRM 5985), VNC, NAS, принтеры (9100, 80, SNMP).</li>
+                    </ul>
+                    <p>Если устройство не ответило ни на один метод — в таблице останется только статус «открыт» и подсказка по номеру порта.</p>
+                </section>
+                <section>
                     <h3>Порты</h3>
                     <p>Порты задаются одним полем: через запятую, диапазоны — через тире. Дубликаты удаляются, список сортируется.</p>
                     <ul>
